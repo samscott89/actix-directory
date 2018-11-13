@@ -10,12 +10,15 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::any::TypeId;
 
-mod channel;
-mod http;
+pub mod channel;
+pub mod http;
 
 #[cfg(test)]
 pub mod test_helpers;
 
+/// Helper type for messages (`actix::Message`) which can be processed by `soar`.
+/// Requires the inputs/outputs to be de/serializable so that they can be sent over
+/// a network.
 pub trait SoarMessage:
 	Message<Result=<Self as SoarMessage>::Response>
 	+ 'static + Send + DeserializeOwned + Serialize
@@ -23,20 +26,10 @@ pub trait SoarMessage:
 	type Response: 'static + Send + DeserializeOwned + Serialize;
 }
 
+/// Wrapper type for a response to a `SoarMessage`. 
+/// Since this implements `actix::MessageResponse`, we can use it as the return type from
+/// a `Handler` implementation. 
 pub struct SoarResponse<M: SoarMessage>(pub Box<Future<Item=M::Response, Error=Error>>);
-
-impl<E, F, M> From<Result<F, E>> for SoarResponse<M>
-	where E: Fail,
-	      F: 'static + Future<Item=M::Response, Error=Error>,
-		  M: SoarMessage,
-{
-	fn from(other: Result<F, E>) -> Self {
-		match other {
-			Ok(fut) => SoarResponse(Box::new(fut)),
-			Err(e) => SoarResponse(Box::new(future::err(Error::from(e)))),
-		}
-	}
-}
 
 impl<M> MessageResponse<Service, M> for SoarResponse<M>
 where
@@ -52,13 +45,22 @@ where
 	}
 }
 
-/// A `RequestHandler` is responsible for taking 
+/// A `RequestHandler` is effectively a simplified version of the `actix::Handler` trait.
+/// It does not need to know about the context, and instead provides a reference to the 
+/// `Service` it is running on, to allow arbitrary other queries to be chained.
+///
+/// An additional error `Error` is added to the return type of the `Message::Response`,
+/// since the meta-service-handler `Service` can also fail.
 pub trait RequestHandler<M>: Send
 	where M: SoarMessage
 {
 	fn handle_request(&self, msg: M, service: &Service) -> Box<Future<Item=M::Response, Error=Error>>;
 }
 
+/// The core of `soar` is the `Service` struct. 
+/// It maintains a map from `M: Message`s (in the form of the `TypeId`), to `RequestHandler<M>`
+/// implementations.
+/// Only a single handler can be added for each `Message` type.
 pub struct Service {
 	name: String,
 	handlers: HashMap<TypeId, Box<Object>>,
@@ -77,12 +79,17 @@ impl Actor for Service {
 }
 
 impl Service {
+	/// Create a new `Service` with the given name. 
+	/// The name is purely used for logging/debugging purposes and is not 
+	/// guaranteed/needed to be unique.
 	pub fn new(name: &str) -> Self {
 		Service {
 			name: name.to_string(),
 			handlers: HashMap::new(),
 		}
 	}
+
+	/// Add the handler to the `Service`.
 	pub fn add_handler<M, H>(&mut self, handler: H)
 		where M: SoarMessage,
 		      H: Object + HasInterface<RequestHandler<M>> + 'static
@@ -92,6 +99,7 @@ impl Service {
 		self.handlers.insert(TypeId::of::<M>(), handler);
 	}
 
+	/// Get the handler identified by the generic type parameter `M`.
 	fn get_handler<M>(&self) -> Option<&RequestHandler<M>>
 		where  M: SoarMessage,
 	{
@@ -106,6 +114,7 @@ impl Service {
 
 #[derive(Default, Deserialize, Serialize, Fail, Debug)]
 #[fail(display = "no handler found")]
+/// `Service` fails when there is no known handler for a given message.
 pub struct ServiceError {}
 
 impl<M> Handler<M> for Service
@@ -116,7 +125,11 @@ impl<M> Handler<M> for Service
 	fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Get handler for message type: {:?}", TypeId::of::<M>());
 		let handler = self.get_handler::<M>().ok_or_else(ServiceError::default);
-		SoarResponse::from(handler.map(|h| h.handle_request(msg, &self)))
+		let resp = handler.map(|h| h.handle_request(msg, &self));
+		match resp {
+			Ok(fut) => SoarResponse(Box::new(fut)),
+			Err(e) => SoarResponse(Box::new(future::err(Error::from(e)))),
+		}
 	}
 }
 

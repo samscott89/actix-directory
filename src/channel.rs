@@ -1,5 +1,5 @@
-/// Module to wrap an actor `Addr` as either over a TLS channel
-/// or running as a local actor.
+//! Create remote actors to use as actors.
+
 use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
 use futures::Future;
@@ -17,6 +17,9 @@ impl<M: SoarMessage> From<Url> for HttpHandler<M> {
     }
 }
 
+/// The `HttpHandler` wraps a `Url` and behaves as a handler for the generic
+/// type `M`. This can be registered as a usual `RequestHandler<M>`, but the
+/// fact that the actual handler is remote is opaque to the application. 
 pub struct HttpHandler<M>(pub Url, PhantomData<M>);
 interfaces!(<M: SoarMessage> HttpHandler<M>: RequestHandler<M>);
 

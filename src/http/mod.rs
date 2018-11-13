@@ -1,2 +1,6 @@
+//! Run the `Service` as an HTTP endpoint.
+
 // pub mod client;
-pub mod server;
+mod server;
+
+pub use self::server::*;

@@ -6,7 +6,14 @@ use log::*;
 
 use crate::*;
 
+/// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
+/// by adding the method `message`.
 pub trait HttpSoarApp {
+
+	/// Register the path `path` as able to respond to requests for the
+	/// message type `M`.
+	/// Since this will use the `Addr<Service>` in the `App` state,
+	/// this handler must have been previously registered.
 	fn message<M>(self, path: &str) -> Self
 		where
 		    M: SoarMessage;
@@ -33,6 +40,7 @@ impl HttpSoarApp for &mut actix_web::test::TestApp<Addr<Service>> {
 }
 
 
+/// Simple wrapper function. Deserialize request, and serialize the output.
 pub fn handle_request<M: 'static>(
     req: &HttpRequest<Addr<Service>>,
 ) -> impl actix_web::Responder
