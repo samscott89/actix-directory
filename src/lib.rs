@@ -10,7 +10,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::any::TypeId;
 
-pub mod channel;
 pub mod http;
 
 #[cfg(test)]
