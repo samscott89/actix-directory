@@ -45,6 +45,9 @@ where
 	}
 }
 
+/// Convenience type for return type of `RequestHandler<M>`.
+pub type RespFuture<M> = Box<Future<Item=<M as SoarMessage>::Response, Error=Error>>;
+
 /// A `RequestHandler` is effectively a simplified version of the `actix::Handler` trait.
 /// It does not need to know about the context, and instead provides a reference to the 
 /// `Service` it is running on, to allow arbitrary other queries to be chained.
@@ -54,8 +57,9 @@ where
 pub trait RequestHandler<M>: Send
 	where M: SoarMessage
 {
-	fn handle_request(&self, msg: M, service: &Service) -> Box<Future<Item=M::Response, Error=Error>>;
+	fn handle_request(&self, msg: M, service: &Service) -> RespFuture<M>;
 }
+
 
 /// The core of `soar` is the `Service` struct. 
 /// It maintains a map from `M: Message`s (in the form of the `TypeId`), to `RequestHandler<M>`

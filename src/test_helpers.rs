@@ -26,7 +26,7 @@ pub struct TestHandler;
 interfaces!(TestHandler: RequestHandler<TestMessage>);
 
 impl RequestHandler<TestMessage> for TestHandler {
-	fn handle_request(&self, msg: TestMessage, _service: &Service) -> Box<Future<Item=TestResponse, Error=Error>> {
+	fn handle_request(&self, msg: TestMessage, _service: &Service) -> RespFuture<TestMessage> {
 		Box::new(future::ok(TestResponse(msg.0)))
 	}
 }
