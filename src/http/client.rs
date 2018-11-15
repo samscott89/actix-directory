@@ -1,5 +1,5 @@
 //! Create remote actors to use as actors.
-
+use actix::Addr;
 use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
 use futures::Future;
@@ -9,7 +9,7 @@ use url::Url;
 
 use std::marker::PhantomData;
 
-use crate::*;
+use crate::service::*;
 
 impl<M: SoarMessage> From<Url> for HttpHandler<M> {
     fn from(other: Url) -> Self {
@@ -24,7 +24,7 @@ pub struct HttpHandler<M>(pub Url, PhantomData<M>);
 interfaces!(<M: SoarMessage> HttpHandler<M>: RequestHandler<M>);
 
 impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
-    fn handle_request(&self, msg: M, _: &Service) -> RespFuture<M> {
+    fn handle_request(&self, msg: M, _: Addr<Service>) -> RespFuture<M> {
         let url = self.0.clone();
         let path = url.path().to_string();
         trace!("Channel making request to Actor running at {} on path {}", url.host_str().unwrap_or(""), path);
@@ -60,11 +60,9 @@ mod tests {
         let url = Url::parse(&server.url("/test")).unwrap();
         trace!("Test URL: {:?}", url);
         let res = server.execute(futures::future::lazy(|| {
-            let addr = start_service(move || {
-                let mut service = Service::new("http_channel_test_client");
-                service.add_handler(HttpHandler::<TestMessage>::from(url.clone()));
-                service
-            });
+            let mut service = Service::build("http_channel_test_client");
+            service.add_handler(HttpHandler::<TestMessage>::from(url.clone()));
+            let addr = service.start();
             addr.send(TestMessage(138))
         })).unwrap();
         assert_eq!(res.0, 138);

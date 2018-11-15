@@ -4,7 +4,7 @@ use failure::Error;
 use futures::Future;
 use log::*;
 
-use crate::*;
+use crate::service::*;
 
 /// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
@@ -69,11 +69,9 @@ mod tests {
 	fn test_http_server() {
 		init_logger();
 		let mut sys = System::new("test-sys");
-		let service = start_service(|| {
-			let mut service = Service::new("test_http_server");
-			service.add_handler(TestHandler);
-			service
-		});
+		let mut service = Service::build("test_http_server");
+		service.add_handler(TestHandler);
+		let service = service.start();
 
 		let server = TestServer::build_with_state(move || service.clone())
 							.start(|app| {
