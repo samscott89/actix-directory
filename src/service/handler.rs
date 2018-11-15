@@ -1,9 +1,6 @@
 use ::actix::dev::*;
-use failure::{Error, Fail};
+use failure::Error;
 use futures::{Future};
-// use failure_derive::Fail;
-// use log::*;
-// use query_interface::{HasInterface, Object};
 use serde::{de::DeserializeOwned, Serialize};
 
 use std::any::Any;

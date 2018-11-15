@@ -60,9 +60,9 @@ mod tests {
         let url = Url::parse(&server.url("/test")).unwrap();
         trace!("Test URL: {:?}", url);
         let res = server.execute(futures::future::lazy(|| {
-            let mut service = Service::build("http_channel_test_client");
-            service.add_handler(HttpHandler::<TestMessage>::from(url.clone()));
-            let addr = service.start();
+            let addr = Service::build("http_channel_test_client")
+                                        .add_http_handler::<TestMessage>(url.clone())
+                                        .address();
             addr.send(TestMessage(138))
         })).unwrap();
         assert_eq!(res.0, 138);

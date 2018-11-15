@@ -69,9 +69,9 @@ mod tests {
 	fn test_http_server() {
 		init_logger();
 		let mut sys = System::new("test-sys");
-		let mut service = Service::build("test_http_server");
-		service.add_handler(TestHandler);
-		let service = service.start();
+		let service = Service::build("test_http_server")
+								.add_handler(TestHandler)
+								.address();
 
 		let server = TestServer::build_with_state(move || service.clone())
 							.start(|app| {

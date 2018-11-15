@@ -1,18 +1,10 @@
 use ::actix::dev::*;
-// use failure::{Error, Fail};
 use futures::{future, Future};
-// use failure_derive::Fail;
 use log::*;
-// use query_interface::{HasInterface, Object};
-// use serde::{de::DeserializeOwned, Serialize};
-// use serde_derive::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::any::{Any, TypeId};
 use std::ops::Deref;
-// use std::rc::Rc;
-// use std::cell::RefCell;
-
 use super::handler::*;
 
 pub struct Router {

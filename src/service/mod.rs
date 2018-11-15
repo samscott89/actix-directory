@@ -1,17 +1,11 @@
 use ::actix::dev::*;
 use failure::{Error, Fail};
 use futures::Future;
-// use failure_derive::Fail;
 use log::*;
-// use query_interface::{HasInterface, Object};
-// use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::{Deserialize, Serialize};
+use url::Url;
 
-// use std::collections::HashMap;
 use std::any::{TypeId};
-// use std::ops::{Deref, DerefMut};
-// use std::rc::Rc;
-// use std::cell::RefCell;
 
 mod handler;
 mod router;
@@ -85,7 +79,14 @@ impl ServiceBuilder {
         }
     }
 
-    pub fn add_handler<M, H>(&mut self, handler: H)
+    pub fn add_http_handler<M>(&mut self, url: Url) -> &mut Self
+        where M: SoarMessage,
+    {
+        let handler = crate::http::HttpHandler::<M>::from(url);
+        self.add_handler(handler)
+    }
+
+    pub fn add_handler<M, H>(&mut self, handler: H) -> &mut Self
         where M: SoarMessage,
               H: 'static + RequestHandler<M>
     {
@@ -96,10 +97,11 @@ impl ServiceBuilder {
         }).map_err(|e| {
             error!("Error adding handler: {}", e);
         }));
+        self
     }
 
     /// Add the handler to the `Service`.
-    pub fn create_handler<M, H>(&mut self, factory: H)
+    pub fn create_handler<M, H>(&mut self, factory: H) -> &mut Self
         where M: SoarMessage,
               H: 'static + IntoHandler<M>
     {
@@ -107,11 +109,12 @@ impl ServiceBuilder {
             handler: factory, _type: ::std::marker::PhantomData,
         }).map_err(|e| {
             error!("Error adding handler: {}", e);
-        }))
+        }));
+        self
     }
 
-    pub fn start(self) -> Addr<Service> {
-        self.inner
+    pub fn address(&mut self) -> Addr<Service> {
+        self.inner.clone()
     }
 }
 
