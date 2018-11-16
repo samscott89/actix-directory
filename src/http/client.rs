@@ -24,7 +24,7 @@ pub struct HttpHandler<M>(pub Url, PhantomData<M>);
 interfaces!(<M: SoarMessage> HttpHandler<M>: RequestHandler<M>);
 
 impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
-    fn handle_request(&self, msg: M, _: Addr<Service>) -> RespFuture<M> {
+    fn handle_request(&mut self, msg: M, _: Addr<Service>) -> RespFuture<M> {
         let url = self.0.clone();
         let path = url.path().to_string();
         trace!("Channel making request to Actor running at {} on path {}", url.host_str().unwrap_or(""), path);

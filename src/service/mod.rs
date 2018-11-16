@@ -27,11 +27,11 @@ where M: SoarMessage,
 {
     type Result = ();
     fn handle(&mut self, msg: AddIntoHandler<M, H>, ctxt: &mut Context<Self>) {
-        trace!("Store handler for message type: {:?}", TypeId::of::<M>());
         let service = ctxt.address().clone();
         let fut1 = msg.handler.spawn_init(service).shared();
         let fut2 = fut1.clone();
         Arbiter::spawn(fut1.map(|_| ()).map_err(|_| ()));
+        trace!("Store future handler for message type: {:?}", TypeId::of::<M>());
         self.router.routes.insert(TypeId::of::<M>(), Route::Pending(Box::new(fut2)));
     }
 }
@@ -41,6 +41,7 @@ where M: SoarMessage,
 {
     type Result = ();
     fn handle(&mut self, msg: AddHandler<M>, _ctxt: &mut Context<Self>) {
+        trace!("Store handler for message type: {:?}", TypeId::of::<M>());
         self.router.routes.insert(TypeId::of::<M>(), Route::Done(Box::new(msg.handler)));
     }
 }
@@ -82,6 +83,7 @@ impl ServiceBuilder {
     pub fn add_http_handler<M>(&mut self, url: Url) -> &mut Self
         where M: SoarMessage,
     {
+        trace!("Add HTTP handler");
         let handler = crate::http::HttpHandler::<M>::from(url);
         self.add_handler(handler)
     }
@@ -90,6 +92,7 @@ impl ServiceBuilder {
         where M: SoarMessage,
               H: 'static + RequestHandler<M>
     {
+        trace!("Add handler");
         let service = self.inner.clone();
         let handler = handler::SoarActor::run(handler, service.clone());
         Arbiter::spawn(self.inner.send(AddHandler {
@@ -105,6 +108,7 @@ impl ServiceBuilder {
         where M: SoarMessage,
               H: 'static + IntoHandler<M>
     {
+        trace!("Create future handler");
         Arbiter::spawn(self.inner.send(AddIntoHandler {
             handler: factory, _type: ::std::marker::PhantomData,
         }).map_err(|e| {
@@ -144,7 +148,9 @@ impl<M> Handler<M> for Service
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         trace!("Get handler for message type: {:?}", TypeId::of::<M>());
-        let handler = self.router.get_recipient::<M>().unwrap().map_err(|_| Error::from(ServiceError::default()));
+        let handler = self.router
+                            .get_recipient::<M>()
+                            .unwrap().map_err(|_| Error::from(ServiceError::default()));
         SoarResponse(Box::new(handler.and_then(|h| h.unwrap().send(msg).map_err(Error::from))))
     }
 }

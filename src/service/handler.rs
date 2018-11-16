@@ -130,5 +130,5 @@ pub type RespFuture<M> = Box<Future<Item=<M as SoarMessage>::Response, Error=Err
 pub trait RequestHandler<M>: Send
     where M: SoarMessage
 {
-    fn handle_request(&self, msg: M, service: Addr<Service>) -> RespFuture<M>;
+    fn handle_request(&mut self, msg: M, service: Addr<Service>) -> RespFuture<M>;
 }

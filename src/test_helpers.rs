@@ -42,7 +42,7 @@ pub struct TestHandler;
 // interfaces!(TestHandler: RequestHandler<TestMessage>);
 
 impl RequestHandler<TestMessage> for TestHandler {
-	fn handle_request(&self, msg: TestMessage, _service: Addr<Service>) -> RespFuture<TestMessage> {
+	fn handle_request(&mut self, msg: TestMessage, _service: Addr<Service>) -> RespFuture<TestMessage> {
 		trace!("Handling TestMessage from TestHandler");
 		Box::new(future::ok(TestResponse(msg.0)))
 	}
@@ -64,7 +64,7 @@ impl IntoHandler<TestMessageEmpty> for TestIntoHandlerConfig {
 }
 
 impl RequestHandler<TestMessageEmpty> for TestIntoHandler {
-	fn handle_request(&self, msg: TestMessageEmpty, service: Addr<Service>) -> RespFuture<TestMessageEmpty> {
+	fn handle_request(&mut self, msg: TestMessageEmpty, service: Addr<Service>) -> RespFuture<TestMessageEmpty> {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
 		Box::new(service.send(TestMessage(42)).map(|resp| ()).map_err(Error::from))
 	}

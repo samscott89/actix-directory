@@ -30,17 +30,31 @@ impl Router {
                     Route::Pending(fut) => {
                         trace!("Handler pending, composing with future");
                         future::Either::A(
-                            fut.clone().map(|any| any.downcast_ref::<Recipient<M>>().cloned())
-                               .map_err(|_| ())
+                            fut.clone().map(|any| {
+                                any.downcast_ref::<Recipient<M>>().cloned()
+                                    .or_else(|| {
+                                        error!("Could not convert to recipient for Type: {:?}", TypeId::of::<M>());
+                                        None
+                                    })
+                            })
+                           .map_err(|_| ())
                         )
                     },
                     Route::Done(any) => {
                         trace!("Route exists, converting handler");
                         future::Either::B(
-                            future::ok(any.downcast_ref::<Recipient<M>>().cloned())
+                           future::ok(any.downcast_ref::<Recipient<M>>().cloned()
+                                .or_else(|| {
+                                    error!("Could not convert to recipient for Type: {:?}", TypeId::of::<M>());
+                                    None
+                                }))
                         )
                     }
                 }
+             })
+             .or_else(||{
+                 error!("Handler not found for type: {:?}", TypeId::of::<M>());
+                 None
              })
         
     }
