@@ -3,56 +3,31 @@ use failure::Error;
 use futures::{Future};
 use serde::{de::DeserializeOwned, Serialize};
 
-use std::any::Any;
-
 use super::*;
 
-pub(crate) struct AddIntoHandler<M, H>
-    where M: SoarMessage,
-          H: IntoHandler<M>
-{
-    pub handler: H,
-    pub _type: ::std::marker::PhantomData<M>,
-}
-
-impl<M, H> Message for AddIntoHandler<M, H>
-    where M: SoarMessage,
-          H: IntoHandler<M>
-{
-    type Result = ();
-}
-
-pub(crate) struct AddHandler<M>
-    where M: SoarMessage,
-{
-    pub handler: Recipient<M>,
-}
-
-impl<M> Message for AddHandler<M>
-    where M: SoarMessage,
-{
-    type Result = ();
-}
-
+/// `IntoHandler` should be implemented for configurations for `RequestHandlers`
+/// which need to be bootstrapped using other services running on the `Service`.
+/// Along with `ServiceBuilder::spawn_handler`, this will schedule the future
+/// and handle any requests make while the service is spawning.
 pub trait IntoHandler<M>: 'static + Send + Sized
     where M: SoarMessage,
 {
     type Handler: RequestHandler<M>;
 
+    /// Initialize the `Handler` by performing a series of requests to the service,
+    /// ultimately returning the ready handler.
     fn init(self, service: Addr<Service>) -> Box<Future<Item=Self::Handler, Error=()>>;
 
     #[doc(hidden)]
-    fn spawn_init(self, service: Addr<Service>) -> Box<Future<Item=Box<Any>, Error=()>> {
-        let service2 = service.clone();
+    /// Start this handler as a wrapped `SoarActor` running on the provided service
+    fn start(self, service: Addr<Service>) -> Box<Future<Item=Recipient<M>, Error=()>> {
         Box::new(self.init(service.clone()).map(move |h| {
-            let recip = Arbiter::start(move |_| {
+            Arbiter::start(move |_| {
                 SoarActor {
                     inner: Box::new(h),
                     service: service.clone(),
                 }
-            }).recipient::<M>();
-            Arbiter::spawn(service2.send(AddHandler { handler: recip.clone() }).map_err(|_| ()));
-            Box::new(recip) as Box<Any>
+            }).recipient::<M>()
         }))
     }
 }
@@ -68,12 +43,16 @@ pub trait SoarMessage:
     type Response: 'static + Send + DeserializeOwned + Serialize;
 }
 
+/// We attempt to hide the details about running actors by wrapping our own
+/// `RequestHandler`type with the `SoarActor`.
 pub struct SoarActor<M: SoarMessage> {
     inner: Box<RequestHandler<M>>,
     service: Addr<Service>,
 }
 
 impl<M: SoarMessage> SoarActor<M> {
+    /// Create and run a new `SoarActor` on the provided service, using the inputted
+    /// handler.
     pub fn run<H: 'static +  RequestHandler<M>>(handler: H, service: Addr<Service>) -> Recipient<M> {
         Arbiter::start(move |_| {
             Self {

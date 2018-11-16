@@ -2,14 +2,12 @@ use ::actix::dev::*;
 use failure::Error;
 use futures::{future, Future};
 use log::*;
-// use query_interface::{interfaces, vtable_for};
 use serde_derive::{Deserialize, Serialize};
 
 use std::sync::Once;
 
 static START: Once = Once::new();
 
-// use super::*;
 use crate::Service;
 use crate::service::{IntoHandler, RequestHandler, RespFuture, SoarMessage};
 
@@ -37,7 +35,6 @@ impl SoarMessage for TestMessageEmpty {
 	type Response = ();
 }
 
-
 pub struct TestHandler;
 // interfaces!(TestHandler: RequestHandler<TestMessage>);
 
@@ -51,7 +48,6 @@ impl RequestHandler<TestMessage> for TestHandler {
 pub struct TestIntoHandlerConfig;
 pub struct TestIntoHandler(u8);
 
-
 impl IntoHandler<TestMessageEmpty> for TestIntoHandlerConfig {
 	type Handler = TestIntoHandler;
 	fn init(self, service: Addr<Service>) -> Box<Future<Item=Self::Handler, Error=()>> {
@@ -64,13 +60,11 @@ impl IntoHandler<TestMessageEmpty> for TestIntoHandlerConfig {
 }
 
 impl RequestHandler<TestMessageEmpty> for TestIntoHandler {
-	fn handle_request(&mut self, msg: TestMessageEmpty, service: Addr<Service>) -> RespFuture<TestMessageEmpty> {
+	fn handle_request(&mut self, _msg: TestMessageEmpty, service: Addr<Service>) -> RespFuture<TestMessageEmpty> {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
-		Box::new(service.send(TestMessage(42)).map(|resp| ()).map_err(Error::from))
+		Box::new(service.send(TestMessage(42)).map(|_resp| ()).map_err(Error::from))
 	}
 }
-
-
 
 pub fn init_logger() {
     START.call_once(|| {

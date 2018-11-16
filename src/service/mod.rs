@@ -1,3 +1,6 @@
+//! 
+//!
+
 use ::actix::dev::*;
 use failure::{Error, Fail};
 use futures::Future;
@@ -5,59 +8,35 @@ use log::*;
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
-use std::any::{TypeId};
+use crate::get_type;
 
 mod handler;
 mod router;
 
-use self::router::{Route, Router};
-use self::handler::{AddIntoHandler, AddHandler};
+use self::router::{Router, AddRoute, AddRouteFuture};
 
 pub use self::handler::{IntoHandler, RequestHandler, RespFuture};
 pub use self::handler::{SoarMessage, SoarResponse};
 
+/// The main `Actor` in soar, representing the core service being run.
+/// The `Service` keeps track of the resources that it can handle through
+/// the `Router` -- a hashmap from types to addresses of handlers.
+///
+/// `ServiceBuilder` provides some helper methods to construct the handlers.
 pub struct Service {
     name: String,
     router: Router,
 }
 
-impl<M, H> Handler<AddIntoHandler<M, H>> for Service
-where M: SoarMessage,
-      H: IntoHandler<M>
-{
-    type Result = ();
-    fn handle(&mut self, msg: AddIntoHandler<M, H>, ctxt: &mut Context<Self>) {
-        let service = ctxt.address().clone();
-        let fut1 = msg.handler.spawn_init(service).shared();
-        let fut2 = fut1.clone();
-        Arbiter::spawn(fut1.map(|_| ()).map_err(|_| ()));
-        trace!("Store future handler for message type: {:?}", TypeId::of::<M>());
-        self.router.routes.insert(TypeId::of::<M>(), Route::Pending(Box::new(fut2)));
-    }
-}
-
-impl<M> Handler<AddHandler<M>> for Service
-where M: SoarMessage,
-{
-    type Result = ();
-    fn handle(&mut self, msg: AddHandler<M>, _ctxt: &mut Context<Self>) {
-        trace!("Store handler for message type: {:?}", TypeId::of::<M>());
-        self.router.routes.insert(TypeId::of::<M>(), Route::Done(Box::new(msg.handler)));
-    }
-}
-
+/// A simple wrapper around a `Service` address.
+/// The `ServiceBuilder` provides some additional methods to help with constructing
+/// the `Service`.
 pub struct ServiceBuilder {
     inner: Addr<Service>,
-    // router: Addr<Router,
 }
 
-
-
-/// The core of `soar` is the `Service` struct. 
-/// It maintains a map from `M: Message`s (in the form of the `TypeId`), to `RequestHandler<M>`
-/// implementations.
-/// Only a single handler can be added for each `Message` type.
 impl Service {
+    /// Create a new `ServiceBuilder`
     pub fn build(name: &str) -> ServiceBuilder {
         ServiceBuilder::new(name)
     }
@@ -80,37 +59,48 @@ impl ServiceBuilder {
         }
     }
 
-    pub fn add_http_handler<M>(&mut self, url: Url) -> &mut Self
-        where M: SoarMessage,
-    {
-        trace!("Add HTTP handler");
-        let handler = crate::http::HttpHandler::<M>::from(url);
-        self.add_handler(handler)
-    }
-
+    /// Add a `RequestHandler` to this `Service`, which handles messages of 
+    /// type `M`.
+    ///
+    /// TODO: What if we `H` to handle more than one `M`?
     pub fn add_handler<M, H>(&mut self, handler: H) -> &mut Self
         where M: SoarMessage,
               H: 'static + RequestHandler<M>
     {
-        trace!("Add handler");
+        trace!("Add handler: {:?}", get_type!(H));
         let service = self.inner.clone();
-        let handler = handler::SoarActor::run(handler, service.clone());
-        Arbiter::spawn(self.inner.send(AddHandler {
-            handler
-        }).map_err(|e| {
-            error!("Error adding handler: {}", e);
-        }));
+        let recip = handler::SoarActor::run(handler, service);
+        Arbiter::spawn(
+            self.inner.send(AddRoute(recip))
+                .map_err(|e| {
+                    error!("Error adding handler: {}", e);
+                })
+        );
         self
     }
 
-    /// Add the handler to the `Service`.
-    pub fn create_handler<M, H>(&mut self, factory: H) -> &mut Self
+    /// Register a handler for messages of type `M` which is served on an 
+    /// HTTP endpoint, fully specified in `url`.
+    ///
+    /// TODO: allow sharing of routes so we can pool connections.
+    pub fn add_http_handler<M>(&mut self, url: Url) -> &mut Self
+        where M: SoarMessage,
+    {
+        trace!("Add HTTP handler to {}", &url);
+        let handler = crate::http::HttpHandler::<M>::from(url);
+        self.add_handler(handler)
+    }
+
+    /// For handlers which need to be initialized using data from other 
+    /// handlers, provide an `IntoHandler`, which has access to the running
+    /// service and can add 
+    pub fn spawn_handler<M, H>(&mut self, factory: H) -> &mut Self
         where M: SoarMessage,
               H: 'static + IntoHandler<M>
     {
-        trace!("Create future handler");
-        Arbiter::spawn(self.inner.send(AddIntoHandler {
-            handler: factory, _type: ::std::marker::PhantomData,
+        trace!("Create future handler to {:?}", get_type!(H::Handler));
+        Arbiter::spawn(self.inner.send(AddRouteFuture {
+            factory, _type: ::std::marker::PhantomData,
         }).map_err(|e| {
             error!("Error adding handler: {}", e);
         }));
@@ -147,10 +137,9 @@ impl<M> Handler<M> for Service
     type Result = SoarResponse<M>;
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        trace!("Get handler for message type: {:?}", TypeId::of::<M>());
         let handler = self.router
                             .get_recipient::<M>()
-                            .unwrap().map_err(|_| Error::from(ServiceError::default()));
-        SoarResponse(Box::new(handler.and_then(|h| h.unwrap().send(msg).map_err(Error::from))))
+                            .map_err(|_| Error::from(ServiceError::default()));
+        SoarResponse(Box::new(handler.and_then(|h| h.send(msg).map_err(Error::from))))
     }
 }

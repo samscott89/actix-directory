@@ -1,3 +1,5 @@
+#![cfg_attr(feature="print_types", feature(core_intrinsics))]
+
 pub mod http;
 pub mod service;
 
@@ -19,13 +21,29 @@ mod tests {
 
 		let addr = Service::build("test")
 						.add_handler::<TestMessage, _>(TestHandler)
-						.create_handler::<TestMessageEmpty, _>(config)
+						.spawn_handler::<TestMessageEmpty, _>(config)
 						.address();
 
 		let fut = addr.send(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
 		let fut = addr.send(TestMessageEmpty);
-		let res = sys.block_on(fut).unwrap();
+		let _res = sys.block_on(fut).unwrap();
 	}
 }
+
+#[cfg(not(feature = "print_types"))]
+#[macro_export]
+macro_rules! get_type {
+	($T:ty) => (
+		::std::any::TypeId::of::<$T>()
+	)
+}
+#[cfg(feature = "print_types")]
+#[macro_export]
+macro_rules! get_type {
+	($T:ty) => (
+		unsafe { ::std::intrinsics::type_name::<$T>() }
+	)
+}
+
