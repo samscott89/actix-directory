@@ -96,8 +96,10 @@ impl Router {
                 );
             })
         );
+        let fut = fut.shared();
+        Arbiter::spawn(fut.clone().map(|_| ()).map_err(|_| ()));
         self.routes.insert(
-            Route::Pending(fut.shared()),
+            Route::Pending(fut),
         );
     }
 
