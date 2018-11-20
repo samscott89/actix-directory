@@ -91,7 +91,9 @@ impl Router {
     {
         trace!("Lookup request handler for {:?}", get_type!(M));
         future::result({
-            self.routes.get().cloned().ok_or(())
+            self.routes.get().cloned().ok_or_else(|| {
+                debug!("No route found for {:?}", get_type!(M));
+            })
         }).and_then(|h| {
             match h {
                 Route::Pending(fut) => {
