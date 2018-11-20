@@ -3,6 +3,7 @@ use anymap::AnyMap;
 use futures::{future, Future};
 use log::*;
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use super::handler::*;
@@ -63,6 +64,13 @@ impl Router {
         );
     }
 
+    /// Delete a handler from the routing table.
+    pub fn remove_handler<M>(&mut self)
+        where M: SoarMessage
+    {
+        self.routes.remove::<M>();
+    }
+
     /// More complex than `insert_handler`, this expects a future which will
     /// eventually resolve into a `Recipient<M>`. (See `IntoHandler::start`).
     /// This has two responsibilities: first a future is scheduled which will
@@ -73,15 +81,25 @@ impl Router {
         where M: SoarMessage,
               F: Future<Item=Recipient<M>, Error=()>,
     {
-        let fut: Box<Future<Item=Recipient<M>, Error=()>> = Box::new(fut.map(move |r: Recipient<M>| {
-            let r2 = r.clone();
-            Arbiter::spawn(
-                service.send(AddRoute(r2)).map_err(|_| ())
-            );
-            r
-        }));
+        let service2 = service.clone();
+        let fut: Box<Future<Item=Recipient<M>, Error=()>> = Box::new(
+            fut.map(move |r: Recipient<M>| {
+                let r2 = r.clone();
+                Arbiter::spawn(
+                    service.send(AddRoute(r2)).map_err(|_| ())
+                );
+                r
+            })
+            .map_err(move |_| {
+                Arbiter::spawn(
+                    service2.send(RemoveRoute(PhantomData::<M>)).map_err(|_| ())
+                );
+            })
+        );
+        let fut = fut.shared();
+        Arbiter::spawn(fut.clone().map(|_| ()).map_err(|_| ()));
         self.routes.insert(
-            Route::Pending(fut.shared()),
+            Route::Pending(fut),
         );
     }
 
@@ -167,5 +185,25 @@ where M: SoarMessage,
         let fut = msg.factory.start(service.clone());
         // Schedules the future as well as handling the router parts.
         self.router.insert_handler_fut(fut, service);
+    }
+}
+
+/// Instruct the service to add this service to the routing table.
+pub(crate) struct RemoveRoute<M>(pub PhantomData<M>)
+    where M: SoarMessage;
+
+impl<M> Message for RemoveRoute<M>
+    where M: SoarMessage,
+{
+    type Result = ();
+}
+
+impl<M> Handler<RemoveRoute<M>> for super::Service
+where M: SoarMessage,
+{
+    type Result = ();
+
+    fn handle(&mut self, _msg: RemoveRoute<M>, _ctxt: &mut Context<Self>) {
+        self.router.remove_handler::<M>();
     }
 }
