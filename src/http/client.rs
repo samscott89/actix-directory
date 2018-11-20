@@ -2,7 +2,7 @@
 use actix::Addr;
 use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
-use futures::Future;
+use futures::{future, Future};
 use log::*;
 use query_interface::{interfaces, vtable_for};
 use url::Url;
@@ -27,16 +27,25 @@ impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
     fn handle_request(&mut self, msg: M, _: Addr<Service>) -> RespFuture<M> {
         let url = self.0.clone();
         let path = url.path().to_string();
+        let msg = bincode::serialize(&msg).map_err(Error::from);
         trace!("Channel making request to Actor running at {} on path {}", url.host_str().unwrap_or(""), path);
-        Box::new(ClientRequest::post(url)
-            .json(msg)
-            .unwrap()
-            .send()
-            .map_err(Error::from)
-            .and_then(|resp| {
-                // Deserialize the JSON and map the error
-                resp.json().map_err(Error::from)
-            }))
+        let fut = future::result(msg).and_then(move |msg| {
+            ClientRequest::post(url)
+                .body(msg)
+                .unwrap()
+                .send()
+                .map_err(Error::from)
+                .and_then(|resp| {
+                    // Deserialize the JSON and map the error
+                    resp.body().map_err(Error::from)
+                })
+                .and_then(|body| {
+                    future::result(bincode::deserialize(&body))
+                        .map_err(Error::from)
+                })
+        });
+        
+        Box::new(fut)
     }
 }
 
@@ -53,7 +62,8 @@ mod tests {
         let mut server = TestServer::new(|app| {
             app.resource("/test", |r| r.f(|_| {
                 trace!("Received request! Responding with answer");
-                actix_web::HttpResponse::Ok().json(TestResponse(138))
+                let msg = bincode::serialize(&TestResponse(138)).unwrap();
+                actix_web::HttpResponse::Ok().body(msg)
             }));
         });
 

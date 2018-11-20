@@ -1,7 +1,7 @@
 use ::actix::dev::*;
 use actix_web::{App, AsyncResponder, HttpMessage, HttpRequest, HttpResponse};
 use failure::Error;
-use futures::Future;
+use futures::{future, Future};
 use log::*;
 
 use crate::service::*;
@@ -48,11 +48,15 @@ pub fn handle_request<M: 'static>(
 	    M: SoarMessage
 {
     let service = req.state().clone();
-    req.json::<M>().map_err(Error::from)
-        .and_then(move |req| service.send(req).map_err(Error::from))
+    req.body().map_err(Error::from)
+    	.and_then(|body| {
+    		bincode::deserialize(&body).map_err(Error::from)
+    	})
+        .and_then(move |req: M| service.send(req).map_err(Error::from))
+        .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");
-            HttpResponse::Ok().json(resp)
+            HttpResponse::Ok().body(resp)
         })
         .responder()
 }
@@ -78,11 +82,16 @@ mod tests {
 								app.message::<TestMessage>("/test");
 							});
 
-		let req = server.post().uri(server.url("/test")).json(TestMessage(12)).unwrap();
+		let msg = bincode::serialize(&TestMessage(12)).unwrap();
+		let req = server.post().uri(server.url("/test")).body(msg).unwrap();
 		trace!("{:?}", req);
 		let response = sys.block_on(req.send()).unwrap();
 		assert!(response.status().is_success());
-		assert_eq!(response.json::<TestResponse>().wait().unwrap(), TestResponse(12));
-
+		assert_eq!(
+			bincode::deserialize::<TestResponse>(
+				&response.body().wait().unwrap()
+			).unwrap(),
+			TestResponse(12)
+		);
 	}
 }
