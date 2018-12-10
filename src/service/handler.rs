@@ -111,3 +111,11 @@ pub trait RequestHandler<M>: Send
 {
     fn handle_request(&mut self, msg: M, service: Addr<Service>) -> RespFuture<M>;
 }
+
+
+impl<M: SoarMessage> RequestHandler<M> for Addr<Service> {
+    fn handle_request(&mut self, msg: M, _service: Addr<Service>) -> RespFuture<M> {
+        let res = self.send(msg).map_err(Error::from);
+        Box::new(res)
+    }
+}

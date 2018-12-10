@@ -4,7 +4,6 @@ use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
 use futures::{future, Future};
 use log::*;
-use query_interface::{interfaces, vtable_for};
 use url::Url;
 
 use std::marker::PhantomData;
@@ -21,7 +20,6 @@ impl<M: SoarMessage> From<Url> for HttpHandler<M> {
 /// type `M`. This can be registered as a usual `RequestHandler<M>`, but the
 /// fact that the actual handler is remote is opaque to the application. 
 pub struct HttpHandler<M>(pub Url, PhantomData<M>);
-interfaces!(<M: SoarMessage> HttpHandler<M>: RequestHandler<M>);
 
 impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
     fn handle_request(&mut self, msg: M, _: Addr<Service>) -> RespFuture<M> {
