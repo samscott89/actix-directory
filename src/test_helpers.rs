@@ -8,8 +8,7 @@ use std::sync::Once;
 
 static START: Once = Once::new();
 
-use crate::Service;
-use crate::service::{IntoHandler, RequestHandler, RespFuture, SoarMessage};
+use crate::service;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TestMessage(pub u8);
@@ -20,7 +19,7 @@ impl Message for TestMessage {
 	type Result = TestResponse;
 }
 
-impl SoarMessage for TestMessage {
+impl service::SoarMessage for TestMessage {
 	type Response = TestResponse;
 }
 
@@ -31,38 +30,47 @@ impl Message for TestMessageEmpty {
 	type Result = ();
 }
 
-impl SoarMessage for TestMessageEmpty {
+impl service::SoarMessage for TestMessageEmpty {
 	type Response = ();
 }
 
+#[derive(Default)]
 pub struct TestHandler;
-// interfaces!(TestHandler: RequestHandler<TestMessage>);
 
-impl RequestHandler<TestMessage> for TestHandler {
-	fn handle_request(&mut self, msg: TestMessage, _service: Addr<Service>) -> RespFuture<TestMessage> {
+impl Actor for TestHandler {
+	type Context = Context<Self>;
+}
+
+impl Handler<TestMessage> for TestHandler {
+	type Result = MessageResult<TestMessage>;
+
+	fn handle(&mut self, msg: TestMessage, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessage from TestHandler");
-		Box::new(future::ok(TestResponse(msg.0)))
+		MessageResult(TestResponse(msg.0))
 	}
 }
 
-pub struct TestIntoHandlerConfig;
-pub struct TestIntoHandler(u8);
+impl Handler<TestMessageEmpty> for TestHandler {
+	type Result = ();
 
-impl IntoHandler<TestMessageEmpty> for TestIntoHandlerConfig {
-	type Handler = TestIntoHandler;
-	fn init(self, service: Addr<Service>) -> Box<Future<Item=Self::Handler, Error=()>> {
-		trace!("Creating future for TestIntoHandler");
-		Box::new(service.send(TestMessage(12)).map(|resp| {
-			trace!("Create TestIntoHandler");
-			TestIntoHandler(resp.0)
-		}).map_err(|_| ()))
+	fn handle(&mut self, msg: TestMessageEmpty, _ctxt: &mut Context<Self>) {
+		trace!("Handling TestMessageEmpty from TestHandler");
 	}
 }
 
-impl RequestHandler<TestMessageEmpty> for TestIntoHandler {
-	fn handle_request(&mut self, _msg: TestMessageEmpty, service: Addr<Service>) -> RespFuture<TestMessageEmpty> {
+#[derive(Default)]
+pub struct TestIntoHandler(pub u8);
+
+impl Actor for TestIntoHandler {
+	type Context = Context<Self>;
+}
+
+impl Handler<TestMessageEmpty> for TestIntoHandler {
+	type Result = service::SoarResponse<TestMessageEmpty>;
+
+	fn handle(&mut self, _msg: TestMessageEmpty, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
-		Box::new(service.send(TestMessage(42)).map(|_resp| ()).map_err(Error::from))
+		service::SoarResponse(Box::new(service::send(TestMessage(42)).map(|_| ())))
 	}
 }
 
@@ -73,10 +81,4 @@ pub fn init_logger() {
     	}
 	    env_logger::init();
     });
-}
-
-pub fn start_service<F>(factory: F) -> Addr<Service>
-	where F: 'static + Send + Fn() -> Service
-{
-	Arbiter::start(move |_| factory())
 }

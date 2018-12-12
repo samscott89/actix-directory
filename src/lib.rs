@@ -3,31 +3,33 @@
 pub mod http;
 pub mod service;
 
-pub use self::service::Service;
-
 #[cfg(test)]
 pub mod test_helpers;
 
 #[cfg(test)]
 mod tests {
+	use actix::Actor;
+	use futures::future;
+
 	use super::*;
+
+	use crate::service;
 	use crate::test_helpers::*;
 
 	#[test]
 	fn test_handler() {
 		init_logger();
-		let config = TestIntoHandlerConfig;
 		let mut sys = actix::System::new("test-sys");
 
-		let addr = Service::build("test")
-						.add_handler::<TestMessage, _>(TestHandler)
-						.spawn_handler::<TestMessageEmpty, _>(config)
-						.address();
+		let handler = TestHandler::start_default();
+		service::add_route::<TestMessage, _>(handler);
+		let handler_fut = future::ok(TestIntoHandler(12).start());
+		service::add_route_fut(handler_fut);
 
-		let fut = addr.send(TestMessage(42));
+		let fut = service::send(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
-		let fut = addr.send(TestMessageEmpty);
+		let fut = service::send(TestMessageEmpty);
 		let _res = sys.block_on(fut).unwrap();
 	}
 }

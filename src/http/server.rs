@@ -4,7 +4,8 @@ use failure::Error;
 use futures::{future, Future};
 use log::*;
 
-use crate::service::*;
+use crate::service;
+use crate::service::SoarMessage;
 
 /// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
@@ -19,7 +20,7 @@ pub trait HttpSoarApp {
 		    M: SoarMessage;
 }
 
-impl HttpSoarApp for App<Addr<Service>> {
+impl HttpSoarApp for App {
 	fn message<M>(self, path: &str) -> Self
 		where
 		    M: SoarMessage,
@@ -29,7 +30,7 @@ impl HttpSoarApp for App<Addr<Service>> {
 }
 
 #[cfg(test)]
-impl HttpSoarApp for &mut actix_web::test::TestApp<Addr<Service>> {
+impl HttpSoarApp for &mut actix_web::test::TestApp {
 	fn message<M>(self, path: &str) -> Self
 		where
 		    M: SoarMessage
@@ -42,17 +43,16 @@ impl HttpSoarApp for &mut actix_web::test::TestApp<Addr<Service>> {
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
 pub fn handle_request<M: 'static>(
-    req: &HttpRequest<Addr<Service>>,
+    req: &HttpRequest,
 ) -> impl actix_web::Responder
 	where
 	    M: SoarMessage
 {
-    let service = req.state().clone();
     req.body().map_err(Error::from)
     	.and_then(|body| {
     		bincode::deserialize(&body).map_err(Error::from)
     	})
-        .and_then(move |req: M| service.send(req).map_err(Error::from))
+        .and_then(move |req: M| service::send(req).map_err(Error::from))
         .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");
@@ -73,14 +73,12 @@ mod tests {
 	fn test_http_server() {
 		init_logger();
 		let mut sys = System::new("test-sys");
-		let service = Service::build("test_http_server")
-								.add_handler(TestHandler)
-								.address();
 
-		let server = TestServer::build_with_state(move || service.clone())
-							.start(|app| {
-								app.message::<TestMessage>("/test");
-							});
+		let server = TestServer::new(|app| {
+			let addr = TestHandler::start_default();
+			service::add_route::<TestMessage, _>(addr);
+			app.message::<TestMessage>("/test");
+		});
 
 		let msg = bincode::serialize(&TestMessage(12)).unwrap();
 		let req = server.post().uri(server.url("/test")).body(msg).unwrap();

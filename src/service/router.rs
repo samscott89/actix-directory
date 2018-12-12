@@ -1,12 +1,14 @@
 use ::actix::dev::*;
 use anymap::AnyMap;
+use failure::{Error, Fail};
 use futures::{future, Future};
 use log::*;
+use serde_derive::{Deserialize, Serialize};
 
 use std::marker::PhantomData;
 use std::ops::Deref;
 
-use super::handler::*;
+use super::*;
 
 use crate::get_type;
 
@@ -16,6 +18,28 @@ use crate::get_type;
 /// actually added (or retrieved).
 pub struct Router {
     pub routes: AnyMap,
+}
+
+impl std::default::Default for Router {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl actix::Supervised for Router {}
+
+impl ArbiterService for Router {}
+
+impl Actor for Router {
+    type Context = actix::Context<Self>;
+
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        trace!("Started router");
+    }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        trace!("Stopped router");
+    }
 }
 
 /// An unfortunate type signature...
@@ -71,37 +95,6 @@ impl Router {
         self.routes.remove::<M>();
     }
 
-    /// More complex than `insert_handler`, this expects a future which will
-    /// eventually resolve into a `Recipient<M>`. (See `IntoHandler::start`).
-    /// This has two responsibilities: first a future is scheduled which will
-    /// eventually call `AddRoute` for the resolved handler (and thus `insert_handler`).
-    /// The second places a shared future into the routing table, which can be
-    /// combined to make future requests to the service.
-    pub fn insert_handler_fut<M, F: 'static>(&mut self, fut: F, service: Addr<super::Service>)
-        where M: SoarMessage,
-              F: Future<Item=Recipient<M>, Error=()>,
-    {
-        let service2 = service.clone();
-        let fut: Box<Future<Item=Recipient<M>, Error=()>> = Box::new(
-            fut.map(move |r: Recipient<M>| {
-                let r2 = r.clone();
-                Arbiter::spawn(
-                    service.send(AddRoute(r2)).map_err(|_| ())
-                );
-                r
-            })
-            .map_err(move |_| {
-                Arbiter::spawn(
-                    service2.send(RemoveRoute(PhantomData::<M>)).map_err(|_| ())
-                );
-            })
-        );
-        let fut = fut.shared();
-        Arbiter::spawn(fut.clone().map(|_| ()).map_err(|_| ()));
-        self.routes.insert(
-            Route::Pending(fut),
-        );
-    }
 
     /// Get the handler identified by the generic type parameter `M`.
     pub fn get_recipient<M>(&self) -> impl Future<Item=Recipient<M>, Error=()>
@@ -134,7 +127,6 @@ impl Router {
     }
 }
 
-
 /// Instruct the service to add this service to the routing table.
 pub(crate) struct AddRoute<M>(pub Recipient<M>)
     where M: SoarMessage;
@@ -145,46 +137,48 @@ impl<M> Message for AddRoute<M>
     type Result = ();
 }
 
-impl<M> Handler<AddRoute<M>> for super::Service
+impl<M> Handler<AddRoute<M>> for Router
 where M: SoarMessage,
 {
     type Result = ();
 
     fn handle(&mut self, msg: AddRoute<M>, _ctxt: &mut Context<Self>) {
-        self.router.insert_handler(msg.0);
+        self.insert_handler(msg.0);
     }
 }
 
 /// Instruct the service to schedule a new future which resolves to a new
 /// handler.
-pub(crate) struct AddRouteFuture<M, H>
+pub(crate) struct AddRouteFuture<M, F>
     where M: SoarMessage,
-          H: IntoHandler<M>
+          F: Future<Item=Recipient<M>, Error=()>
 {
-    pub factory: H,
-    pub _type: ::std::marker::PhantomData<M>,
+    pub fut: F,
+    // pub _type: ::std::marker::PhantomData<M>,
 }
 
-impl<M, H> Message for AddRouteFuture<M, H>
+impl<M, F> Message for AddRouteFuture<M, F>
     where M: SoarMessage,
-          H: IntoHandler<M>
+          F: Future<Item=Recipient<M>, Error=()>
 {
     type Result = ();
 }
 
-impl<M, H> Handler<AddRouteFuture<M, H>> for super::Service
+impl<M, F> Handler<AddRouteFuture<M, F>> for Router
 where M: SoarMessage,
-      H: IntoHandler<M>
+      F: 'static + Future<Item=Recipient<M>, Error=()>
 {
     type Result = ();
 
-    fn handle(&mut self, msg: AddRouteFuture<M, H>, ctxt: &mut Context<Self>) {
-        let service = ctxt.address();
-        // `IntoHandler` has an auto-implemented `start` method which will
-        // run the initialize process, using the provided service.
-        let fut = msg.factory.start(service.clone());
-        // Schedules the future as well as handling the router parts.
-        self.router.insert_handler_fut(fut, service);
+    fn handle(&mut self, msg: AddRouteFuture<M, F>, ctxt: &mut Context<Self>) {
+        let fut: Box<Future<Item=Recipient<M>, Error=()>> = Box::new(msg.fut);
+        let shared = fut.shared();
+        let fut = shared.clone().into_actor(&*self).map(|recip, router, _ctxt| {
+            router.insert_handler(recip.deref().clone());
+            recip
+        });
+        ctxt.spawn(fut.map(|_, _ ,_| ()).map_err(|_, _, _| ()));
+        self.routes.insert(Route::Pending(shared));
     }
 }
 
@@ -198,12 +192,29 @@ impl<M> Message for RemoveRoute<M>
     type Result = ();
 }
 
-impl<M> Handler<RemoveRoute<M>> for super::Service
+impl<M> Handler<RemoveRoute<M>> for Router
 where M: SoarMessage,
 {
     type Result = ();
 
     fn handle(&mut self, _msg: RemoveRoute<M>, _ctxt: &mut Context<Self>) {
-        self.router.remove_handler::<M>();
+        self.remove_handler::<M>();
+    }
+}
+
+#[derive(Default, Deserialize, Serialize, Fail, Debug)]
+#[fail(display = "routing error found")]
+/// `Router` fails when there is no known handler for a given message.
+pub struct RouterError {}
+
+impl<M> Handler<M> for Router
+    where M: SoarMessage
+{
+    type Result = SoarResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        let handler = self.get_recipient::<M>()
+                          .map_err(|_| Error::from(RouterError::default()));
+        SoarResponse(Box::new(handler.and_then(|h| h.send(msg).map_err(Error::from))))
     }
 }

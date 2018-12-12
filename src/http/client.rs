@@ -1,5 +1,6 @@
 //! Create remote actors to use as actors.
-use actix::Addr;
+// use actix::Addr;
+use actix::prelude::*;
 use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
 use futures::{future, Future};
@@ -8,7 +9,8 @@ use url::Url;
 
 use std::marker::PhantomData;
 
-use crate::service::*;
+use crate::service;
+use crate::service::SoarMessage;
 
 impl<M: SoarMessage> From<Url> for HttpHandler<M> {
     fn from(other: Url) -> Self {
@@ -21,8 +23,14 @@ impl<M: SoarMessage> From<Url> for HttpHandler<M> {
 /// fact that the actual handler is remote is opaque to the application. 
 pub struct HttpHandler<M>(pub Url, PhantomData<M>);
 
-impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
-    fn handle_request(&mut self, msg: M, _: Addr<Service>) -> RespFuture<M> {
+impl<M: 'static> Actor for HttpHandler<M> {
+    type Context = Context<Self>;
+}
+
+impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
+    type Result = service::SoarResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         let url = self.0.clone();
         let path = url.path().to_string();
         let msg = bincode::serialize(&msg).map_err(Error::from);
@@ -43,12 +51,13 @@ impl<M: SoarMessage> RequestHandler<M> for HttpHandler<M> {
                 })
         });
         
-        Box::new(fut)
+        service::SoarResponse(Box::new(fut))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use actix::Actor;
     use actix_web::test::TestServer;
 
     use super::*;
@@ -57,6 +66,7 @@ mod tests {
     #[test]
     fn test_http_channel() {
         init_logger();
+        let mut sys = System::new("test");
         let mut server = TestServer::new(|app| {
             app.resource("/test", |r| r.f(|_| {
                 trace!("Received request! Responding with answer");
@@ -67,12 +77,10 @@ mod tests {
 
         let url = Url::parse(&server.url("/test")).unwrap();
         trace!("Test URL: {:?}", url);
-        let res = server.execute(futures::future::lazy(|| {
-            let addr = Service::build("http_channel_test_client")
-                                        .add_http_handler::<TestMessage>(url.clone())
-                                        .address();
-            addr.send(TestMessage(138))
-        })).unwrap();
+
+        let handler = HttpHandler::from(url).start();
+        service::add_route::<TestMessage, _>(handler);
+        let res = sys.block_on(service::send(TestMessage(138))).unwrap();
         assert_eq!(res.0, 138);
     }
 }
