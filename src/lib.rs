@@ -27,7 +27,7 @@ mod tests {
 
 		let handler = TestHandler::start_default();
 		let service = service::Service::new()
-			.add_service::<TestMessage, _>(None, handler)
+			.add_service::<TestMessage, _, _>(service::no_client(), handler)
 			.run();
 
 		let fut = service::send(TestMessage(42));

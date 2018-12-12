@@ -27,6 +27,10 @@ impl std::default::Default for Service {
 impl actix::Supervised for Service { }
 impl SystemService for Service { }
 
+pub fn no_client<M: SoarMessage>() -> Recipient<M> {
+    Passthrough::start_default().recipient()
+}
+
 impl Service {
     pub fn new() -> Self {
         let client = Arbiter::new("soar_service_client");
@@ -54,16 +58,13 @@ impl Service {
         }));
     }
 
-    pub fn add_service<M, RS>(self, client: Option<RS>, service: RS) -> Self
+    pub fn add_service<M, RC, RS>(self, client: RC, service: RS) -> Self
         where M: SoarMessage,
-              // RC: Into<Recipient<M>> + Send + 'static,
+              RC: Into<Recipient<M>> + Send + 'static,
               RS: Into<Recipient<M>> + Send + 'static,
     {
         self.with_client(|| {
-            match client {
-                Some(r) => add_route(r),
-                None => add_route::<M, _>(Passthrough::start_default()), 
-            };
+            add_route(client);
         });
         self.with_server(|| {
             add_route(service);
@@ -71,15 +72,12 @@ impl Service {
         self
     }
 
-    pub fn add_http_service<M, RC>(self, client: Option<RC>, url: Url) -> Self
+    pub fn add_http_service<M, RC>(self, client: RC, url: Url) -> Self
         where M: SoarMessage,
               RC: Into<Recipient<M>> + Send + 'static,
     {
         self.with_client(||  {
-            match client {
-                Some(r) => add_route(r),
-                None => add_route::<M, _>(Passthrough::start_default()), 
-            };
+            add_route(client);
         });
         self.with_server(|| {
             add_route::<M, _>(crate::http::HttpHandler::from(url).start());
