@@ -2,6 +2,9 @@
 
 pub mod http;
 pub mod service;
+pub(crate) mod router;
+
+pub use self::router::{SoarMessage, SoarResponse};
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -13,24 +16,23 @@ mod tests {
 
 	use super::*;
 
+	use crate::router;
 	use crate::service;
 	use crate::test_helpers::*;
 
 	#[test]
-	fn test_handler() {
+	fn test_service() {
 		init_logger();
 		let mut sys = actix::System::new("test-sys");
 
 		let handler = TestHandler::start_default();
-		service::add_route::<TestMessage, _>(handler);
-		let handler_fut = future::ok(TestIntoHandler(12).start());
-		service::add_route_fut(handler_fut);
+		let service = service::Service::new()
+			.add_service::<TestMessage, _>(None, handler)
+			.run();
 
 		let fut = service::send(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
-		let fut = service::send(TestMessageEmpty);
-		let _res = sys.block_on(fut).unwrap();
 	}
 }
 

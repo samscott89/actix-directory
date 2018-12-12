@@ -10,7 +10,7 @@ use url::Url;
 use std::marker::PhantomData;
 
 use crate::service;
-use crate::service::SoarMessage;
+use crate::router::{SoarMessage, SoarResponse};
 
 impl<M: SoarMessage> From<Url> for HttpHandler<M> {
     fn from(other: Url) -> Self {
@@ -28,7 +28,7 @@ impl<M: 'static> Actor for HttpHandler<M> {
 }
 
 impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
-    type Result = service::SoarResponse<M>;
+    type Result = SoarResponse<M>;
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         let url = self.0.clone();
@@ -51,7 +51,7 @@ impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
                 })
         });
         
-        service::SoarResponse(Box::new(fut))
+        SoarResponse(Box::new(fut))
     }
 }
 
@@ -62,6 +62,7 @@ mod tests {
 
     use super::*;
     use crate::test_helpers::*;
+    use crate::router;
 
     #[test]
     fn test_http_channel() {
@@ -79,8 +80,8 @@ mod tests {
         trace!("Test URL: {:?}", url);
 
         let handler = HttpHandler::from(url).start();
-        service::add_route::<TestMessage, _>(handler);
-        let res = sys.block_on(service::send(TestMessage(138))).unwrap();
+        router::add_route::<TestMessage, _>(handler);
+        let res = sys.block_on(router::send(TestMessage(138))).unwrap();
         assert_eq!(res.0, 138);
     }
 }

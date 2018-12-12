@@ -8,7 +8,7 @@ use std::sync::Once;
 
 static START: Once = Once::new();
 
-use crate::service;
+use crate::*;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TestMessage(pub u8);
@@ -19,7 +19,7 @@ impl Message for TestMessage {
 	type Result = TestResponse;
 }
 
-impl service::SoarMessage for TestMessage {
+impl SoarMessage for TestMessage {
 	type Response = TestResponse;
 }
 
@@ -30,7 +30,7 @@ impl Message for TestMessageEmpty {
 	type Result = ();
 }
 
-impl service::SoarMessage for TestMessageEmpty {
+impl SoarMessage for TestMessageEmpty {
 	type Response = ();
 }
 
@@ -66,11 +66,11 @@ impl Actor for TestIntoHandler {
 }
 
 impl Handler<TestMessageEmpty> for TestIntoHandler {
-	type Result = service::SoarResponse<TestMessageEmpty>;
+	type Result = SoarResponse<TestMessageEmpty>;
 
 	fn handle(&mut self, _msg: TestMessageEmpty, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
-		service::SoarResponse(Box::new(service::send(TestMessage(42)).map(|_| ())))
+		SoarResponse(Box::new(service::send(TestMessage(42)).map(|_| ())))
 	}
 }
 
