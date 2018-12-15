@@ -271,20 +271,20 @@ pub fn add_route<M, R>(handler: R)
 /// Set the completion of the future to handle messages of type `M`.
 /// Any messages for this address in the meantime will be chained
 /// onto the future.
-pub fn add_route_fut<M, R, F>(fut: F)
-    where M: SoarMessage,
-          R: Into<Recipient<M>>,
-          F: 'static + Future<Item=R, Error=()> + Send,
-{
-    send_spawn(AddRouteFuture { fut: fut.map(|r| r.into()) });
-}
+// pub fn add_route_fut<M, R, F>(fut: F)
+//     where M: SoarMessage,
+//           R: Into<Recipient<M>>,
+//           F: 'static + Future<Item=R, Error=()> + Send,
+// {
+//     send_spawn(AddRouteFuture { fut: fut.map(|r| r.into()) });
+// }
 
 /// Delete the route
-pub fn del_route<M>()
-    where M: SoarMessage
-{
-    send_spawn(RemoveRoute(std::marker::PhantomData::<M>));
-}
+// pub fn del_route<M>()
+//     where M: SoarMessage
+// {
+//     send_spawn(RemoveRoute(std::marker::PhantomData::<M>));
+// }
 
 fn send_spawn<M>(msg: M)
     where Router: Handler<M>,

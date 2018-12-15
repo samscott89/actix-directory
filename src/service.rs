@@ -1,8 +1,7 @@
 use ::actix::dev::*;
 use actix::msgs::Execute;
-use failure::{Error, Fail};
-use futures::{future, future::Either, Future};
-use log::*;
+use failure::Error;
+use futures::Future;
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 

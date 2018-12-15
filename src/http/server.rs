@@ -3,8 +3,8 @@ use failure::Error;
 use futures::{future, Future};
 use log::*;
 
+use crate::SoarMessage;
 use crate::service;
-use crate::router::*;
 
 /// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
@@ -41,7 +41,7 @@ impl HttpSoarApp for &mut actix_web::test::TestApp {
 
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
-pub fn handle_request<M: 'static>(
+fn handle_request<M: 'static>(
     req: &HttpRequest,
 ) -> impl actix_web::Responder
 	where
@@ -51,7 +51,7 @@ pub fn handle_request<M: 'static>(
     	.and_then(|body| {
     		bincode::deserialize(&body).map_err(Error::from)
     	})
-        .and_then(move |req: M| send(req).map_err(Error::from))
+        .and_then(move |req: M| service::send(req).map_err(Error::from))
         .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");

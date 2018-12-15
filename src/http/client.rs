@@ -9,7 +9,6 @@ use url::Url;
 
 use std::marker::PhantomData;
 
-use crate::service;
 use crate::router::{SoarMessage, SoarResponse};
 
 impl<M: SoarMessage> From<Url> for HttpHandler<M> {
