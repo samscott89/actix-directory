@@ -1,6 +1,5 @@
 use ::actix::dev::*;
-use failure::Error;
-use futures::{future, Future};
+use futures::Future;
 use log::*;
 use serde_derive::{Deserialize, Serialize};
 
@@ -53,7 +52,7 @@ impl Handler<TestMessage> for TestHandler {
 impl Handler<TestMessageEmpty> for TestHandler {
 	type Result = ();
 
-	fn handle(&mut self, msg: TestMessageEmpty, _ctxt: &mut Context<Self>) {
+	fn handle(&mut self, _msg: TestMessageEmpty, _ctxt: &mut Context<Self>) {
 		trace!("Handling TestMessageEmpty from TestHandler");
 	}
 }

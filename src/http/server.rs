@@ -59,39 +59,3 @@ fn handle_request<M: 'static>(
         })
         .responder()
 }
-
-#[cfg(test)]
-mod tests {
-	use actix::{Actor, System};
-	use actix_web::test::TestServer;
-
-	use super::*;
-	use super::HttpSoarApp;
-
-	use crate::router::*;
-	use crate::test_helpers::*;
-
-	#[test]
-	fn test_http_server() {
-		init_logger();
-		let mut sys = System::new("test-sys");
-
-		let server = TestServer::new(|app| {
-			let addr = TestHandler::start_default();
-			add_route::<TestMessage, _>(addr);
-			app.message::<TestMessage>("/test");
-		});
-
-		let msg = bincode::serialize(&TestMessage(12)).unwrap();
-		let req = server.post().uri(server.url("/test")).body(msg).unwrap();
-		trace!("{:?}", req);
-		let response = sys.block_on(req.send()).unwrap();
-		assert!(response.status().is_success());
-		assert_eq!(
-			bincode::deserialize::<TestResponse>(
-				&response.body().wait().unwrap()
-			).unwrap(),
-			TestResponse(12)
-		);
-	}
-}

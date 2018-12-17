@@ -1,7 +1,7 @@
 use ::actix::dev::*;
 use actix::msgs::Execute;
 use failure::Error;
-use futures::Future;
+use futures::{Future, IntoFuture};
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
@@ -25,10 +25,6 @@ impl std::default::Default for Service {
 
 impl actix::Supervised for Service { }
 impl SystemService for Service { }
-
-pub fn no_client<M: SoarMessage>() -> Recipient<M> {
-    Passthrough::start_default().recipient()
-}
 
 impl Service {
     pub fn new() -> Self {
@@ -175,6 +171,36 @@ impl<M> Handler<M> for Passthrough
         let res = send_remote(msg).map_err(Error::from);
         SoarResponse(Box::new(res))
     }
+}
+
+pub fn no_client<M: SoarMessage>() -> Recipient<M> {
+    Passthrough::start_default().recipient()
+}
+
+#[derive(Default)]
+struct EmptyServer;
+
+impl Actor for EmptyServer {
+    type Context = Context<Self>;
+}
+
+impl<M> Handler<M> for EmptyServer
+    where M: SoarMessage,
+{
+    type Result = SoarResponse<M>;
+
+    fn handle(&mut self, _msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        SoarResponse::from(
+            Err(
+                router::RouterError::default().into()
+            ).into_future()
+        )
+    }
+}
+
+
+pub fn no_server<M: SoarMessage>() -> Recipient<M> {
+    EmptyServer::start_default().recipient()
 }
 
 #[derive(Debug, Deserialize, Serialize)]

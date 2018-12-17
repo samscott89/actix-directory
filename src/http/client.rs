@@ -53,34 +53,3 @@ impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
         SoarResponse(Box::new(fut))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use actix::Actor;
-    use actix_web::test::TestServer;
-
-    use super::*;
-    use crate::test_helpers::*;
-    use crate::router;
-
-    #[test]
-    fn test_http_channel() {
-        init_logger();
-        let mut sys = System::new("test");
-        let mut server = TestServer::new(|app| {
-            app.resource("/test", |r| r.f(|_| {
-                trace!("Received request! Responding with answer");
-                let msg = bincode::serialize(&TestResponse(138)).unwrap();
-                actix_web::HttpResponse::Ok().body(msg)
-            }));
-        });
-
-        let url = Url::parse(&server.url("/test")).unwrap();
-        trace!("Test URL: {:?}", url);
-
-        let handler = HttpHandler::from(url).start();
-        router::add_route::<TestMessage, _>(handler);
-        let res = sys.block_on(router::send(TestMessage(138))).unwrap();
-        assert_eq!(res.0, 138);
-    }
-}

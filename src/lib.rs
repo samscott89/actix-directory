@@ -2,7 +2,7 @@
 
 pub mod http;
 pub mod service;
-pub(crate) mod router;
+mod router;
 
 pub use self::router::{SoarMessage, SoarResponse};
 
@@ -11,12 +11,14 @@ pub mod test_helpers;
 
 #[cfg(test)]
 mod tests {
-	use actix::Actor;
-	use futures::future;
+	use actix::{Actor, System};
+	// use actix_web::server;
+	use actix_web::test::TestServer;
+	use url::Url;
 
-	use super::*;
+	use std::sync::mpsc;
 
-	use crate::router;
+	use crate::http::HttpSoarApp;
 	use crate::service;
 	use crate::test_helpers::*;
 
@@ -26,13 +28,43 @@ mod tests {
 		let mut sys = actix::System::new("test-sys");
 
 		let handler = TestHandler::start_default();
-		let service = service::Service::new()
-			.add_service::<TestMessage, _, _>(service::no_client(), handler)
+		let _service = service::Service::new()
+			.add_service::<TestMessage, _, _>(handler, service::no_server())
 			.run();
 
 		let fut = service::send(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
+	}
+
+	#[test]
+	fn test_http_service() {
+	    init_logger();
+	    let mut sys = System::new("test_client");
+
+	    let (sender, receiver) = mpsc::sync_channel(1);
+
+	    std::thread::spawn(move || {
+		    // actix_web::test::TestServer does some actix::System
+		    // shenanigans. Easier to run everything inside the closure.
+		    let server = TestServer::new(move |app| {
+		        let addr = TestHandler::start_default();
+		        let _service = service::Service::new()
+		            .add_service::<TestMessage, _, _>(addr, service::no_server())
+		            .run();
+		        app.message::<TestMessage>("/test");
+		    });
+	        sender.send(server.url("/test")).unwrap();
+	    });
+
+	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
+
+	    let _service = service::Service::new()
+	        .add_http_service::<TestMessage, _>(service::no_client(), url)
+	        .run();
+
+	    let res = sys.block_on(service::send(TestMessage(138))).unwrap();
+	    assert_eq!(res.0, 138);
 	}
 }
 
