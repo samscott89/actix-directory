@@ -28,8 +28,9 @@ impl SystemService for Service { }
 
 impl Service {
     pub fn new() -> Self {
-        let client = Arbiter::new("soar_service_client");
-        let server = Arbiter::new("soar_service_server");
+        let root = Arbiter::name();
+        let client = Arbiter::new(format!("{}::soar_service_client", &root));
+        let server = Arbiter::new(format!("{}::soar_service_server", &root));
         Self {
             client, server,
         }
