@@ -29,7 +29,7 @@ mod tests {
 
 		let handler = TestHandler::start_default();
 		let _service = service::Service::new()
-			.add_service::<TestMessage, _, _>(handler, service::no_server())
+			.add_local::<TestMessage, _>(handler)
 			.run();
 
 		let fut = service::send(TestMessage(42));
@@ -50,7 +50,7 @@ mod tests {
 		    let server = TestServer::new(move |app| {
 		        let addr = TestHandler::start_default();
 		        let _service = service::Service::new()
-		            .add_service::<TestMessage, _, _>(addr, service::no_server())
+		            .add_local::<TestMessage, _>(addr)
 		            .run();
 		        app.message::<TestMessage>("/test");
 		    });
@@ -60,7 +60,8 @@ mod tests {
 	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
 
 	    let _service = service::Service::new()
-	        .add_http_service::<TestMessage, _>(service::no_client(), url)
+	    	.add_local::<TestMessage, _>(service::no_client())
+	        .add_http_remote::<TestMessage>(url)
 	        .run();
 
 	    let res = sys.block_on(service::send(TestMessage(138))).unwrap();
