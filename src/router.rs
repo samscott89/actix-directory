@@ -264,7 +264,7 @@ pub fn add_route<M, R>(handler: R)
     where M: SoarMessage,
           R: 'static + Into<Recipient<M>>
 {
-    trace!("Add handler {:?} for {:?}", get_type!(R), get_type!(M));
+    trace!("Add handler {:?} for {:?} on arbiter: {}", get_type!(R), get_type!(M), Arbiter::name());
     send_spawn(AddRoute(handler.into()))
 }
 
