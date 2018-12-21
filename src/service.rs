@@ -54,27 +54,30 @@ impl Service {
         }));
     }
 
-    pub fn add_service<M, RC, RS>(self, client: RC, service: RS) -> Self
+    pub fn add_local<M, R>(self, client: R) -> Self
         where M: SoarMessage,
-              RC: Into<Recipient<M>> + Send + 'static,
-              RS: Into<Recipient<M>> + Send + 'static,
+              R: Into<Recipient<M>> + Send + 'static,
     {
         self.with_client(|| {
             add_route(client);
         });
+        self
+    }
+        
+
+    pub fn add_remote<M, R>(self, service: R) -> Self
+        where M: SoarMessage,
+              R: Into<Recipient<M>> + Send + 'static,
+    {
         self.with_server(|| {
             add_route(service);
         });
         self
     }
 
-    pub fn add_http_service<M, RC>(self, client: RC, url: Url) -> Self
+    pub fn add_http_remote<M>(self, url: Url) -> Self
         where M: SoarMessage,
-              RC: Into<Recipient<M>> + Send + 'static,
     {
-        self.with_client(||  {
-            add_route(client);
-        });
         self.with_server(|| {
             add_route::<M, _>(crate::http::HttpHandler::from(url).start());
         });
