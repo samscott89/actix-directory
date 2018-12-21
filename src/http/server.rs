@@ -1,4 +1,4 @@
-use actix_web::{App, AsyncResponder, HttpMessage, HttpRequest, HttpResponse};
+use actix_web::{http, App, AsyncResponder, HttpMessage, HttpRequest, HttpResponse};
 use actix_web::middleware::cors;
 use failure::Error;
 use futures::{future, Future};
@@ -29,14 +29,14 @@ impl HttpSoarApp for App {
 		where
 		    M: SoarMessage,
 	{
-		self.resource(path, |r| { r.f(|r| handle_request::<M>(r)) })
+		self.route(path, http::Method::POST, handle_request::<M>)
 	}
 
     fn jmessage<M>(self, path: &str) -> Self
         where
             M: SoarMessage,
     {
-        self.resource(path, |r| { r.f(|r| handle_json_request::<M>(r)) })
+        self.route(path, http::Method::POST, handle_json_request::<M>)
     }
 }
 
@@ -45,17 +45,17 @@ impl HttpSoarApp for &mut cors::CorsBuilder {
         where
             M: SoarMessage,
     {
-        self.resource(path, |r| { r.f(|r| handle_request::<M>(r)) })
+        self.resource(path, |r| r.post().with(handle_request::<M>))
     }
 
     fn jmessage<M>(self, path: &str) -> Self
         where
             M: SoarMessage,
     {
-        self.resource(path, |r| { r.f(|r| handle_json_request::<M>(r)) })
+        self.resource(path, |r| r.post().with(handle_json_request::<M>))
     }
-}
 
+}
 #[cfg(test)]
 impl HttpSoarApp for &mut actix_web::test::TestApp {
 	fn message<M>(self, path: &str) -> Self
@@ -63,7 +63,7 @@ impl HttpSoarApp for &mut actix_web::test::TestApp {
 		    M: SoarMessage
 	{
 		trace!("TEST: Handle message");
-		self.resource(path, |r| { r.f(|r| handle_request::<M>(r)) })
+        self.resource(path, |r| r.post().with(handle_request::<M>))
 	}
 
     fn jmessage<M>(self, path: &str) -> Self
@@ -71,14 +71,14 @@ impl HttpSoarApp for &mut actix_web::test::TestApp {
             M: SoarMessage
     {
         trace!("TEST: Handle message");
-        self.resource(path, |r| { r.f(|r| handle_json_request::<M>(r)) })
+        self.resource(path, |r| r.post().with(handle_json_request::<M>))
     }
 }
 
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
 fn handle_json_request<M: 'static>(
-    req: &HttpRequest,
+    req: HttpRequest,
 ) -> impl actix_web::Responder
     where
         M: SoarMessage
@@ -94,7 +94,7 @@ fn handle_json_request<M: 'static>(
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
 fn handle_request<M: 'static>(
-    req: &HttpRequest,
+    req: HttpRequest,
 ) -> impl actix_web::Responder
 	where
 	    M: SoarMessage
