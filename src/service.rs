@@ -5,6 +5,7 @@ use futures::{Future, IntoFuture};
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
+use crate::get_type;
 use crate::router;
 use crate::router::*;
 
@@ -59,7 +60,9 @@ impl Service {
               R: Into<Recipient<M>> + Send + 'static,
     {
         self.with_client(|| {
-            add_route(client);
+            log::trace!("Add local handler {:?} for {:?} on arbiter: {}", get_type!(R), get_type!(M), Arbiter::name());
+
+            add_route(client.into());
         });
         self
     }
@@ -70,7 +73,9 @@ impl Service {
               R: Into<Recipient<M>> + Send + 'static,
     {
         self.with_server(|| {
-            add_route(service);
+            log::trace!("Add remote handler {:?} for {:?} on arbiter: {}", get_type!(R), get_type!(M), Arbiter::name());
+
+            add_route(service.into());
         });
         self
     }
@@ -79,7 +84,8 @@ impl Service {
         where M: SoarMessage,
     {
         self.with_server(|| {
-            add_route::<M, _>(crate::http::HttpHandler::from(url).start());
+            log::trace!("Add http handler {:?} for {:?} on arbiter: {}", url, get_type!(M), Arbiter::name());
+            add_route::<M>(crate::http::HttpHandler::from(url).start().into());
         });
         self
     }

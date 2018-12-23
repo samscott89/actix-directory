@@ -174,12 +174,10 @@ impl<A, M> MessageResponse<A, M> for SoarResponse<M>
 }
 
 /// Register this recipient (usually `Addr<Actor>`) as handling a given message type
-pub fn add_route<M, R>(handler: R)
+pub fn add_route<M>(handler: Recipient<M>)
     where M: SoarMessage,
-          R: 'static + Into<Recipient<M>>
 {
-    trace!("Add handler {:?} for {:?} on arbiter: {}", get_type!(R), get_type!(M), Arbiter::name());
-    send_spawn(AddRoute(handler.into()))
+    send_spawn(AddRoute(handler))
 }
 
 // /// Delete the route
@@ -211,47 +209,63 @@ pub fn send<M>(msg: M) -> impl Future<Item=M::Result, Error=Error>
 }
 
 
-pub struct PendingRoute<M>
-    where M: SoarMessage,
+#[derive(Clone)]
+pub struct Pending<A>
+    where A: Actor,
 {
-    fut: future::Shared<Box<Future<Item=Recipient<M>, Error=Error>>>
+    fut: future::Shared<Box<Future<Item=Addr<A>, Error=Error> + Send>>
 }
 
-impl<M> PendingRoute<M>
-    where M: SoarMessage
-{
-    pub fn new<F, I>(fut: F) -> Addr<Self>
-        where 
-            I: Into<Recipient<M>>,
-            F: 'static + Future<Item=I, Error=Error>
-    {
-        let fut = fut.map(|i| i.into());
-        let fut: Box<Future<Item=Recipient<M>, Error=Error>> = Box::new(fut);
-        let shared = fut.shared();
-        let shared2 = shared.clone();
-        Arbiter::spawn(
-            shared2
-                .map_err(|_| ())
-                .and_then(|recip| {
-                    send(AddRoute(recip.deref().clone()))
-                        .map(|_| ())
-                        .map_err(|_| ())
-                })
-        );
-        Self {
-            fut: shared,
-        }.start()
-    }
-}
-
-impl<M> Actor for PendingRoute<M>
-    where M: SoarMessage
+impl<A> Actor for Pending<A>
+    where A: Actor
 {
     type Context = actix::Context<Self>;
 }
 
-impl<M> Handler<M> for PendingRoute<M>
-    where M: SoarMessage,
+impl<A> Pending<A>
+    where A: Actor<Context=Context<A>>,
+{
+    pub fn new<F>(fut: F) -> Self
+        where 
+            F: 'static + Future<Item=Addr<A>, Error=Error> + Send
+    {
+        let fut: Box<Future<Item=Addr<A>, Error=Error> + Send> = Box::new(fut);
+        let shared = fut.shared();
+
+        Self {
+            fut: shared,
+        }
+    }
+}
+
+impl<A, M> Into<Recipient<M>> for Pending<A>
+    where A: Actor<Context=Context<A>> + Handler<M>,
+          M: SoarMessage,
+{
+    fn into(self) -> Recipient<M> {
+        let shared = self.fut.clone();
+        // This ensures that a new route will get registered each time
+        // Pending is used for a new route.
+        // Although, care should be taken not to call `.into` elsewhere...
+        Arbiter::spawn(
+            shared
+                .map_err(|_| ())
+                .and_then(|recip| {
+                    send(AddRoute(recip.deref().clone().recipient()))
+                        .map(|_| ())
+                        .map_err(|_| ())
+                })
+        );
+        self.start().recipient()
+    }
+
+}
+
+
+impl<A, M> Handler<M> for Pending<A>
+    where 
+        A: Actor<Context=Context<A>> + Handler<M>,
+        M: SoarMessage,
 {
     type Result = SoarResponse<M>;
 

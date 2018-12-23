@@ -4,7 +4,7 @@ pub mod http;
 pub mod service;
 mod router;
 
-pub use self::router::{PendingRoute, SoarMessage, SoarResponse};
+pub use self::router::{Pending, SoarMessage, SoarResponse};
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -24,7 +24,7 @@ mod tests {
 	use crate::http::HttpSoarApp;
 	use crate::service;
 	use crate::test_helpers::*;
-	use crate::PendingRoute;
+	use crate::Pending;
 
 	#[test]
 	fn test_service() {
@@ -59,7 +59,7 @@ mod tests {
 			log::trace!("Create TestHandler");
 			TestHandler::start_default()
 		});
-		let handler = PendingRoute::new(fut);
+		let handler = Pending::new(fut);
 		let _service = service::Service::new()
 			.add_local::<TestMessage, _>(handler)
 			.run();
