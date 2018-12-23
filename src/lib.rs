@@ -4,7 +4,7 @@ pub mod http;
 pub mod service;
 mod router;
 
-pub use self::router::{SoarMessage, SoarResponse};
+pub use self::router::{PendingRoute, SoarMessage, SoarResponse};
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -14,13 +14,17 @@ mod tests {
 	use actix::{Actor, System};
 	// use actix_web::server;
 	use actix_web::test::TestServer;
+	use failure::Error;
+	use futures::Future;
 	use url::Url;
 
 	use std::sync::mpsc;
+	use std::{time, thread};
 
 	use crate::http::HttpSoarApp;
 	use crate::service;
 	use crate::test_helpers::*;
+	use crate::PendingRoute;
 
 	#[test]
 	fn test_service() {
@@ -28,6 +32,34 @@ mod tests {
 		let mut sys = actix::System::new("test-sys");
 
 		let handler = TestHandler::start_default();
+		let _service = service::Service::new()
+			.add_local::<TestMessage, _>(handler)
+			.run();
+
+		let fut = service::send(TestMessage(42));
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.0, 42);
+	}
+
+	#[test]
+	fn test_fut_service() {
+		init_logger();
+		let mut sys = actix::System::new("test-sys");
+
+		let (p, c) = futures::sync::oneshot::channel::<()>();
+
+		thread::spawn(|| {
+			let t = time::Duration::from_millis(100);
+			log::trace!("Future sleeping");
+			thread::sleep(t);
+			log::trace!("Future waking up");
+		    let _ = p.send(());
+		});
+		let fut = c.map_err(Error::from).map(|_| {
+			log::trace!("Create TestHandler");
+			TestHandler::start_default()
+		});
+		let handler = PendingRoute::new(fut);
 		let _service = service::Service::new()
 			.add_local::<TestMessage, _>(handler)
 			.run();

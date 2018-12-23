@@ -1,7 +1,7 @@
 use ::actix::dev::*;
 use anymap::AnyMap;
 use failure::{Error, Fail};
-use futures::{future, Future};
+use futures::{future, Future, IntoFuture};
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::ops::Deref;
 use crate::get_type;
 
 /// A lookup from `Message` types to addresses to request handlers.
-/// This is encapsulated by an `AnyMap`, but the methods `insert_handler`, 
-/// and `insert_handler_fut` ensure that only `Route<M: SoarMessage>`s are
+/// This is encapsulated by an `AnyMap`, but the method `insert_handler`, 
+/// ensure that only `Recipient<M: SoarMessage>`s are
 /// actually added (or retrieved).
 pub struct Router {
     pub routes: AnyMap,
@@ -41,36 +41,6 @@ impl Actor for Router {
     }
 }
 
-/// An unfortunate type signature...
-/// The inner type is `Box<Any>` which is intentionally hiding the actual
-/// type signature `Recipient<M>`, since we want to erase the type.
-/// (This type is recovered through the map's key).
-/// Next, `Shared` requires a `Future: Sized` implementation, which we
-/// also need to box apparently
-/// And finally, the `Shared` itself needs to be boxed, 
-type PendingRoute<M> = future::Shared<Box<Future<Item=Recipient<M>, Error=()>>>;
-
-/// A `Route` is either a straightforward `Recipient<M>`, which is stored in the
-/// table as an `Any` and downcasted back to a `Recipient<M>`. (We make sure
-/// this invariant stays true by limiting the places where we add to the table).
-///
-/// Or, the pending type contains a future which eventually resolves to the same
-/// value. While in the pending states, requests to this route are handled by
-/// cloning the future and combining with the request. TODO: In the case where
-/// the startup takes a while, can this cause congestion issues?
-pub enum Route<M: SoarMessage> {
-    Pending(PendingRoute<M>),
-    Done(Recipient<M>),
-}
-
-impl<M: SoarMessage> Clone for Route<M> {
-    fn clone(&self) -> Self {
-        match self {
-            Route::Pending(r) => Route::Pending(r.clone()),
-            Route::Done(r) => Route::Done(r.clone()),
-        }
-    }
-}
 
 impl Router {
     /// Create a new router.
@@ -83,7 +53,7 @@ impl Router {
     /// Add this address into the routing table.
     pub fn insert_handler<M: SoarMessage>(&mut self, handler: Recipient<M>) {
         self.routes.insert(
-            Route::Done(handler)
+            handler
         );
     }
 
@@ -91,38 +61,16 @@ impl Router {
     pub fn remove_handler<M>(&mut self)
         where M: SoarMessage
     {
-        self.routes.remove::<M>();
+        self.routes.remove::<Recipient<M>>();
     }
 
 
     /// Get the handler identified by the generic type parameter `M`.
-    pub fn get_recipient<M>(&self) -> impl Future<Item=Recipient<M>, Error=()>
+    pub fn get_recipient<M>(&self) -> Option<Recipient<M>>
         where  M: SoarMessage,
     {
         trace!("Lookup request handler for {:?} on arbiter: {}", get_type!(M), Arbiter::name());
-        future::result({
-            self.routes.get().cloned().ok_or_else(|| {
-                debug!("No route found for {:?}", get_type!(M));
-            })
-        }).and_then(|h| {
-            match h {
-                Route::Pending(fut) => {
-                    trace!("Handler pending, composing with future");
-                    future::Either::A(
-                        fut.map(|recip| {
-                            recip.deref().clone()
-                        }).map_err(|_| ())
-                    )
-                },
-                Route::Done(recip) => {
-                    trace!("Route exists, converting handler");
-                    future::Either::B(
-                       future::ok(recip)
-                    )
-                }
-            }
-        })
-        
+        self.routes.get().cloned()
     }
 }
 
@@ -143,41 +91,6 @@ where M: SoarMessage,
 
     fn handle(&mut self, msg: AddRoute<M>, _ctxt: &mut Context<Self>) {
         self.insert_handler(msg.0);
-    }
-}
-
-/// Instruct the service to schedule a new future which resolves to a new
-/// handler.
-pub(crate) struct AddRouteFuture<M, F>
-    where M: SoarMessage,
-          F: Future<Item=Recipient<M>, Error=()>
-{
-    pub fut: F,
-    // pub _type: ::std::marker::PhantomData<M>,
-}
-
-impl<M, F> Message for AddRouteFuture<M, F>
-    where M: SoarMessage,
-          F: Future<Item=Recipient<M>, Error=()>
-{
-    type Result = ();
-}
-
-impl<M, F> Handler<AddRouteFuture<M, F>> for Router
-where M: SoarMessage,
-      F: 'static + Future<Item=Recipient<M>, Error=()>
-{
-    type Result = ();
-
-    fn handle(&mut self, msg: AddRouteFuture<M, F>, ctxt: &mut Context<Self>) {
-        let fut: Box<Future<Item=Recipient<M>, Error=()>> = Box::new(msg.fut);
-        let shared = fut.shared();
-        let fut = shared.clone().into_actor(&*self).map(|recip, router, _ctxt| {
-            router.insert_handler(recip.deref().clone());
-            recip
-        });
-        ctxt.spawn(fut.map(|_, _ ,_| ()).map_err(|_, _, _| ()));
-        self.routes.insert(Route::Pending(shared));
     }
 }
 
@@ -213,8 +126,9 @@ impl<M> Handler<M> for Router
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         let handler = self.get_recipient::<M>()
-                          .map_err(|_| Error::from(RouterError::default()));
-        SoarResponse(Box::new(handler.and_then(|h| h.send(msg).map_err(Error::from))))
+                          .ok_or_else(|| Error::from(RouterError::default()));
+        let fut = handler.into_future().and_then(|h| h.send(msg).map_err(Error::from));
+        SoarResponse::from(fut)
     }
 }
 
@@ -268,18 +182,7 @@ pub fn add_route<M, R>(handler: R)
     send_spawn(AddRoute(handler.into()))
 }
 
-/// Set the completion of the future to handle messages of type `M`.
-/// Any messages for this address in the meantime will be chained
-/// onto the future.
-// pub fn add_route_fut<M, R, F>(fut: F)
-//     where M: SoarMessage,
-//           R: Into<Recipient<M>>,
-//           F: 'static + Future<Item=R, Error=()> + Send,
-// {
-//     send_spawn(AddRouteFuture { fut: fut.map(|r| r.into()) });
-// }
-
-/// Delete the route
+// /// Delete the route
 // pub fn del_route<M>()
 //     where M: SoarMessage
 // {
@@ -306,3 +209,61 @@ pub fn send<M>(msg: M) -> impl Future<Item=M::Result, Error=Error>
     Arbiter::registry().get::<Router>().send(msg)
         .map_err(Error::from)
 }
+
+
+pub struct PendingRoute<M>
+    where M: SoarMessage,
+{
+    fut: future::Shared<Box<Future<Item=Recipient<M>, Error=Error>>>
+}
+
+impl<M> PendingRoute<M>
+    where M: SoarMessage
+{
+    pub fn new<F, I>(fut: F) -> Addr<Self>
+        where 
+            I: Into<Recipient<M>>,
+            F: 'static + Future<Item=I, Error=Error>
+    {
+        let fut = fut.map(|i| i.into());
+        let fut: Box<Future<Item=Recipient<M>, Error=Error>> = Box::new(fut);
+        let shared = fut.shared();
+        let shared2 = shared.clone();
+        Arbiter::spawn(
+            shared2
+                .map_err(|_| ())
+                .and_then(|recip| {
+                    send(AddRoute(recip.deref().clone()))
+                        .map(|_| ())
+                        .map_err(|_| ())
+                })
+        );
+        Self {
+            fut: shared,
+        }.start()
+    }
+}
+
+impl<M> Actor for PendingRoute<M>
+    where M: SoarMessage
+{
+    type Context = actix::Context<Self>;
+}
+
+impl<M> Handler<M> for PendingRoute<M>
+    where M: SoarMessage,
+{
+    type Result = SoarResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        let fut = self.fut.clone()
+                          .map_err(|_| Error::from(RouterError::default()))
+                          .and_then(move |recip| 
+                            recip
+                                .deref().clone()
+                                .send(msg)
+                                .map_err(Error::from));
+        SoarResponse::from(fut)
+    }
+}
+
