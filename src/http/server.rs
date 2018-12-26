@@ -5,7 +5,7 @@ use futures::{future, Future};
 use log::*;
 
 use crate::SoarMessage;
-use crate::service;
+use crate::app;
 
 /// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
@@ -85,7 +85,7 @@ fn handle_json_request<M: 'static>(
 {
     req.json().map_err(Error::from)
         .and_then(move |req: M| 
-            service::send(req).map_err(Error::from))
+            app::send_in(req).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");
             HttpResponse::Ok().json(resp)
@@ -103,7 +103,7 @@ fn handle_request<M: 'static>(
     	.and_then(|body| {
     		bincode::deserialize(&body).map_err(Error::from)
     	})
-        .and_then(move |req: M| service::send(req).map_err(Error::from))
+        .and_then(move |req: M| app::send_in(req).map_err(Error::from))
         .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");

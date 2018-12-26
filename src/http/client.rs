@@ -9,7 +9,7 @@ use url::Url;
 
 use std::marker::PhantomData;
 
-use crate::router::{SoarMessage, SoarResponse};
+use crate::{SoarMessage, SoarResponse};
 
 impl<M: SoarMessage> From<Url> for HttpHandler<M> {
     fn from(other: Url) -> Self {
@@ -52,4 +52,27 @@ impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
         
         SoarResponse(Box::new(fut))
     }
+}
+
+pub fn send<M>(msg: M, url: Url) -> impl Future<Item=M::Response, Error=Error>
+    where M: SoarMessage,
+{
+    // let path = url.path().to_string();
+    let msg = bincode::serialize(&msg).map_err(Error::from);
+    trace!("Channel making request to Actor running at {:?}", url);
+    future::result(msg).and_then(move |msg| {
+        ClientRequest::post(url)
+            .body(msg)
+            .unwrap()
+            .send()
+            .map_err(Error::from)
+            .and_then(|resp| {
+                // Deserialize the JSON and map the error
+                resp.body().map_err(Error::from)
+            })
+            .and_then(|body| {
+                future::result(bincode::deserialize(&body))
+                    .map_err(Error::from)
+            })
+    })
 }

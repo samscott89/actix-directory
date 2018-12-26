@@ -69,7 +69,7 @@ impl Handler<TestMessageEmpty> for TestIntoHandler {
 
 	fn handle(&mut self, _msg: TestMessageEmpty, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
-		SoarResponse(Box::new(service::send(TestMessage(42)).map(|_| ())))
+		SoarResponse(Box::new(app::send(TestMessage(42)).map(|_| ())))
 	}
 }
 
