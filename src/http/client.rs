@@ -54,7 +54,7 @@ impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
     }
 }
 
-pub fn send<M>(msg: M, url: Url) -> impl Future<Item=M::Response, Error=Error>
+pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     where M: SoarMessage,
 {
     // let path = url.path().to_string();

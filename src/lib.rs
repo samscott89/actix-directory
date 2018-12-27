@@ -3,8 +3,10 @@
 pub mod app;
 pub mod http;
 mod router;
+pub mod service;
 
-// pub use self::router::Pending;
+pub use self::app::App;
+pub use self::router::StringifiedMessage;
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -77,10 +79,10 @@ mod tests {
 		init_logger();
 		let mut sys = actix::System::new("test-sys");
 
-		let handler = TestHandler::start_default();
+		let handler = Ok(TestHandler::start_default());
 		let app = app::App::new()
-			.add_server::<TestMessage, _>(handler)
-			.run();
+			.add_server::<TestMessage, _, _>(handler)
+			.make_current();
 
 		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
@@ -91,33 +93,59 @@ mod tests {
 		assert!(res.is_err());
 	}
 
-	// #[test]
-	// fn test_fut_service() {
-	// 	init_logger();
-	// 	let mut sys = actix::System::new("test-sys");
+	#[test]
+	fn test_stringly_service() {
+		init_logger();
+		let mut sys = actix::System::new("test-sys");
 
-	// 	let (p, c) = futures::sync::oneshot::channel::<()>();
+		let handler = TestHandler::start_default();
+		app::App::new()
+			.add_server_str("test", handler)
+			.make_current();
 
-	// 	thread::spawn(|| {
-	// 		let t = time::Duration::from_millis(100);
-	// 		log::trace!("Future sleeping");
-	// 		thread::sleep(t);
-	// 		log::trace!("Future waking up");
-	// 	    let _ = p.send(());
-	// 	});
-	// 	let fut = c.map_err(Error::from).map(|_| {
-	// 		log::trace!("Create TestHandler");
-	// 		TestHandler::start_default()
-	// 	});
-	// 	let handler = Pending::new(fut);
-	// 	let _service = service::Service::new()
-	// 		.add_local::<TestMessage, _>(handler)
-	// 		.run();
+		let fut = app::send_in(TestMessage(42));
+		let res = sys.block_on(fut);
+		assert!(res.is_err());
 
-	// 	let fut = service::send(TestMessage(42));
-	// 	let res = sys.block_on(fut).unwrap();
-	// 	assert_eq!(res.0, 42);
-	// }
+		let fut = app::send_in(crate::StringifiedMessage { id: "test".to_string(), inner: Vec::new()});
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.unwrap().id, "test_response");
+
+		let fut = app::send_in(crate::StringifiedMessage { id: "other".to_string(), inner: Vec::new()});
+		let res = sys.block_on(fut);
+		assert!(res.is_err());
+	}
+
+	#[test]
+	fn test_fut_service() {
+		init_logger();
+		let mut sys = actix::System::new("test-sys");
+
+		let (p, c) = futures::sync::oneshot::channel::<()>();
+
+		thread::spawn(|| {
+			let t = time::Duration::from_millis(100);
+			log::trace!("Future sleeping");
+			thread::sleep(t);
+			log::trace!("Future waking up");
+		    let _ = p.send(());
+		});
+		let fut = c.map_err(Error::from).map(|_| {
+			log::trace!("Create TestHandler");
+			TestHandler::start_default()
+		});
+		let app = app::App::new()
+			.add_server::<TestMessage, _, _>(fut)
+			.make_current();
+
+		let fut = app::send_in(TestMessage(42));
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.0, 42);
+
+		let fut = app::send_out(TestMessage(42));
+		let res = sys.block_on(fut);
+		assert!(res.is_err());
+	}
 
 	#[test]
 	fn test_http_service() {
@@ -130,10 +158,10 @@ mod tests {
 		    // actix_web::test::TestServer does some actix::System
 		    // shenanigans. Easier to run everything inside the closure.
 		    let server = TestServer::new(move |app| {
-		        let addr = TestHandler::start_default();
-		        let _service = app::App::new()
-		            .add_server::<TestMessage, _>(addr)
-		            .run();
+		        let addr = Ok(TestHandler::start_default());
+		        let service = app::App::new()
+		            .add_server::<TestMessage, _, _>(addr)
+		            .make_current();
 		        app.message::<TestMessage>("/test");
 		    });
 	        sender.send(server.url("/test")).unwrap();
@@ -142,9 +170,9 @@ mod tests {
 	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
 
 	    let _service = app::App::new()
-	    	.add_client::<TestMessage, _>(app::no_client())
+	    	.add_client::<TestMessage, _, _>(app::no_client())
 	        .add_http_remote::<TestMessage>(url)
-	        .run();
+	        .make_current();
 
 	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();
 	    assert_eq!(res.0, 138);

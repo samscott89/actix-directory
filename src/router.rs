@@ -1,22 +1,24 @@
 use ::actix::dev::*;
-use anymap::AnyMap;
+use anymap::any;
 use failure::{Error, Fail};
 use futures::{future, Future, IntoFuture};
 use log::*;
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
-use crate::{app, get_type, http, SoarMessage};
+use crate::{get_type, http, SoarMessage, SoarResponse};
 
 /// A lookup from `Message` types to addresses to request handlers.
 /// This is encapsulated by an `AnyMap`, but the method `insert_handler`, 
 /// ensure that only `Recipient<M: SoarMessage>`s are
 /// actually added (or retrieved).
+#[derive(Clone)]
 pub struct Router {
-    pub routes: AnyMap,
+    pub routes: anymap::Map<any::CloneAny>,
+    pub str_routes: HashMap<String, Recipient<StringifiedMessage>>,
 }
 
 impl std::default::Default for Router {
@@ -29,7 +31,8 @@ impl Router {
     /// Create a new router.
     pub fn new() -> Self {
         Router {
-            routes: AnyMap::new(),
+            routes: anymap::Map::new(),
+            str_routes: HashMap::new(),
         }
     }
 
@@ -40,12 +43,23 @@ impl Router {
         );
     }
 
+    pub fn insert_str(&mut self, id: &str, handler: Recipient<StringifiedMessage>) {
+        self.str_routes.insert(id.to_string(), handler);
+    }
+
     // /// Delete a handler from the routing table.
     // pub fn remove<M>(&mut self)
     //     where M: SoarMessage
     // {
     //     self.routes.remove::<Recipient<M>>();
     // }
+
+    /// Get the handler identified by the generic type parameter `M`.
+    pub fn get_str(&self, id: &str) -> Option<Recipient<StringifiedMessage>>
+    {
+        trace!("Lookup request handler for {:?}", id);
+        self.str_routes.get(id).cloned()
+    }
 
     /// Get the handler identified by the generic type parameter `M`.
     pub fn get<M>(&self) -> Option<Recipient<M>>
@@ -55,13 +69,31 @@ impl Router {
         self.routes.get().cloned()
     }
 
+
     pub fn send<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
         where M: SoarMessage,
     {
-        let recip = self.get::<M>()
-             .ok_or_else(|| Error::from(RouterError::default()))
-             .into_future();
-        recip.and_then(|r| r.send(msg).map_err(Error::from))
+        match Any::downcast_ref::<StringifiedMessage>(&msg) {
+            Some(m) => {
+                trace!("Sending string-typed message with id: {}", m.id);
+                let recip = self.get_str(&m.id)
+                     .ok_or_else(|| Error::from(RouterError::default()))
+                     .into_future();
+                future::Either::A(
+                    recip
+                        .and_then(|r| {
+                            let r = Any::downcast_ref::<Recipient<M>>(&r).unwrap();
+                            r.clone().send(msg).map_err(Error::from)
+                        }))
+            },
+            _ => {
+                trace!("Sending regular message with type {:?}", get_type!(M));
+                let recip = self.get::<M>()
+                     .ok_or_else(|| Error::from(RouterError::default()))
+                     .into_future();
+                future::Either::B(recip.and_then(|r| r.send(msg).map_err(Error::from)))
+            }
+        }
     }
 }
 
@@ -70,10 +102,17 @@ impl Router {
 /// `Router` fails when there is no known handler for a given message.
 pub struct RouterError {}
 
+impl From<Url> for Remote {
+    fn from(other: Url) -> Remote {
+        Remote::Http(other)
+    }
+}
 
-#[derive(Default)]
+
+#[derive(Clone, Default)]
 pub struct Upstream {
-    inner: HashMap<TypeId, Remote>
+    inner: HashMap<TypeId, Remote>,
+    str_inner: HashMap<String, Remote>,
 }
 
 #[derive(Clone)]
@@ -87,7 +126,8 @@ enum Remote {
 impl Upstream {
     pub fn new() -> Self {
         Self {
-            inner: HashMap::new()
+            inner: HashMap::new(),
+            str_inner: HashMap::new(),
         }
     }
 
@@ -104,90 +144,84 @@ impl Upstream {
         self
     }
 
+    pub fn insert_http_str(&mut self, id: &str, url: Url) -> &mut Self
+    {
+        self.str_inner.insert(id.to_string(), Remote::Http(url));
+        self
+    }
+
     pub fn send<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
         where M: SoarMessage,
     {
         let up = self.get::<M>()
              .ok_or_else(|| Error::from(RouterError::default()))
              .into_future();
-        up.and_then(|up| {
+        up.and_then(move |up| {
             match up {
-                Remote::Http(url) => http::send(msg, url),
+                Remote::Http(url) => http::send(&msg, url),
                 // Remote::App(app) => future::Either::B(app.send_out(msg).map_err(Error::from))
             }
         })
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StringifiedMessage {
+    pub id: String,
+    pub inner: Vec<u8>,
+}
 
-// #[derive(Clone)]
-// pub struct Pending<A>
-//     where A: Actor,
-// {
-//     fut: future::Shared<Box<Future<Item=Addr<A>, Error=Error> + Send>>
-// }
+impl Message for StringifiedMessage {
+    type Result = Result<StringifiedMessage, StringifiedMessage>;
+}
 
-// impl<A> Actor for Pending<A>
-//     where A: Actor
-// {
-//     type Context = actix::Context<Self>;
-// }
+impl SoarMessage for StringifiedMessage {
+    type Response = <Self as Message>::Result;
+}
 
-// impl<A> Pending<A>
-//     where A: Actor<Context=Context<A>>,
-// {
-//     pub fn new<F>(fut: F) -> Self
-//         where 
-//             F: 'static + Future<Item=Addr<A>, Error=Error> + Send
-//     {
-//         let fut: Box<Future<Item=Addr<A>, Error=Error> + Send> = Box::new(fut);
-//         let shared = fut.shared();
+#[derive(Clone)]
+pub struct PendingRoute<M>
+    where M: SoarMessage,
+{
+    fut: future::Shared<Box<Future<Item=Recipient<M>, Error=Error> + Send>>
+}
 
-//         Self {
-//             fut: shared,
-//         }
-//     }
-// }
+impl<M> Actor for PendingRoute<M>
+    where M: SoarMessage,
+{
+    type Context = actix::Context<Self>;
+}
 
-// impl<A, M> Into<Recipient<M>> for Pending<A>
-//     where A: Actor<Context=Context<A>> + Handler<M>,
-//           M: SoarMessage,
-// {
-//     fn into(self) -> Recipient<M> {
-//         let shared = self.fut.clone();
-//         // This ensures that a new route will get registered each time
-//         // Pending is used for a new route.
-//         // Although, care should be taken not to call `.into` elsewhere...
-//         Arbiter::spawn(
-//             shared
-//                 .map_err(|_| ())
-//                 .and_then(|recip| {
-//                     send(AddRoute(recip.deref().clone().recipient()))
-//                         .map(|_| ())
-//                         .map_err(|_| ())
-//                 })
-//         );
-//         self.start().recipient()
-//     }
-// }
+impl<M> PendingRoute<M>
+    where M: SoarMessage,
+{
+    pub fn new<F, I>(fut: F) -> Self
+        where 
+            I: Into<Recipient<M>>,
+            F: 'static + Future<Item=I, Error=Error> + Send
+    {
+        let fut: Box<Future<Item=Recipient<M>, Error=Error> + Send> = Box::new(fut.map(|r| r.into()));
+        let shared = fut.shared();
 
+        Self {
+            fut: shared,
+        }
+    }
+}
 
-// impl<A, M> Handler<M> for Pending<A>
-//     where 
-//         A: Actor<Context=Context<A>> + Handler<M>,
-//         M: SoarMessage,
-// {
-//     type Result = SoarResponse<M>;
+impl<M> Handler<M> for PendingRoute<M>
+    where 
+        M: SoarMessage,
+{
+    type Result = SoarResponse<M>;
 
-//     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-//         let fut = self.fut.clone()
-//                           .map_err(|_| Error::from(RouterError::default()))
-//                           .and_then(move |recip| 
-//                             recip
-//                                 .deref().clone()
-//                                 .send(msg)
-//                                 .map_err(Error::from));
-//         SoarResponse::from(fut)
-//     }
-// }
-
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        let fut = self.fut.clone()
+                          .map_err(|_| Error::from(RouterError::default()))
+                          .and_then(move |recip| 
+                            recip.clone()
+                                .send(msg)
+                                .map_err(Error::from));
+        SoarResponse::from(fut)
+    }
+}

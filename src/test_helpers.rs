@@ -40,12 +40,40 @@ impl Actor for TestHandler {
 	type Context = Context<Self>;
 }
 
+impl crate::service::Service for TestHandler {
+	fn add_to(self, app: &mut crate::app::App) -> &mut crate::app::App {
+		let addr = self.start();
+		app.add_server::<TestMessage, _, _>(Ok(addr.clone()))
+		   .add_server::<TestMessageEmpty, _, _>(Ok(addr.clone()))
+	}
+}
+
 impl Handler<TestMessage> for TestHandler {
 	type Result = MessageResult<TestMessage>;
 
 	fn handle(&mut self, msg: TestMessage, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessage from TestHandler");
 		MessageResult(TestResponse(msg.0))
+	}
+}
+
+
+impl Handler<crate::StringifiedMessage> for TestHandler {
+	type Result = MessageResult<StringifiedMessage>;
+
+	fn handle(&mut self, msg: StringifiedMessage, _ctxt: &mut Context<Self>) -> Self::Result {
+		trace!("Handling TestMessage from TestHandler");
+		if msg.id == "test" {
+			MessageResult(Ok(StringifiedMessage {
+				id: "test_response".to_string(),
+				inner: b"some reply".to_vec(),
+			}))
+		} else {
+			MessageResult(Err(StringifiedMessage {
+				id: "err".to_string(),
+				inner: b"unknown route".to_vec(),
+			}))
+		}
 	}
 }
 

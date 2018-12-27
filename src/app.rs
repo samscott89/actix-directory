@@ -4,12 +4,19 @@ use futures::{Future, IntoFuture};
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
+use std::sync::RwLock;
 
 use crate::{SoarMessage, SoarResponse};
 use crate::router;
 use crate::router::{Router, Upstream};
 
-#[derive(Default)]
+thread_local!(
+    /// Each thread maintains its own App struct, which is basically
+    /// routing information for messages
+    pub(crate) static APP: RwLock<App> = RwLock::new(App::default())
+);
+
+#[derive(Clone, Default)]
 pub struct App {
     client: Router,
     server: Router,
@@ -19,10 +26,6 @@ pub struct App {
 impl Actor for App {
     type Context = Context<Self>;
 }
-
-
-impl actix::Supervised for App { }
-impl SystemService for App { }
 
 impl App {
     pub fn new() -> Self {
@@ -34,64 +37,92 @@ impl App {
         }
     }
 
-    pub fn add_client<M, R>(mut self, client: R) -> Self
+    pub fn add_client<M, F, R>(&mut self, client: F) -> &mut Self
         where M: SoarMessage,
+              F: IntoFuture<Item=R, Error=Error>,
+              F::Future: 'static + Send,
               R: Into<Recipient<M>> + 'static,
     {
-        self.client.insert(client.into());
+        let fut = client.into_future().map(|client| {
+            let client: Recipient<M> = client.into();
+            let client2 = client.clone();
+            APP.with(move |app| {
+                app.write().unwrap().add_client::<M, _, _>(Ok(client2));
+            });
+            client
+        });
+        let client = router::PendingRoute::new(fut);
+        self.client.insert(client.start().recipient());
         self
     }
 
-    pub fn add_server<M, R>(mut self, server: R) -> Self
-        where M: SoarMessage,
-              R: Into<Recipient<M>> +  'static,
+    pub fn add_client_str<R>(&mut self, id: &str, client: R) -> &mut Self
+        where R: Into<Recipient<crate::StringifiedMessage>>
     {
-        self.server.insert(server.into());
+        self.client.insert_str(id, client.into());
         self
     }
 
-    pub fn add_http_remote<M>(mut self, url: Url) -> Self
+    pub fn add_server<M, F, R>(&mut self, server: F) -> &mut Self
+        where M: SoarMessage,
+              F: IntoFuture<Item=R, Error=Error>,
+              F::Future: 'static + Send,
+              R: Into<Recipient<M>> + 'static,
+
+    {
+        let fut = server.into_future().map(|server| {
+            let server: Recipient<M> = server.into();
+            let server2 = server.clone();
+            APP.with(move |app| {
+                app.write().unwrap().add_server::<M, _, _>(Ok(server2));
+            });
+            server
+        });
+        let server = router::PendingRoute::new(fut);
+        self.server.insert(server.start().recipient());
+        self
+    }
+
+    pub fn add_server_str<R>(&mut self, id: &str, client: R) -> &mut Self
+        where R: Into<Recipient<crate::StringifiedMessage>>
+    {
+        self.server.insert_str(id, client.into());
+        self
+    }
+
+    pub fn add_http_remote<M>(&mut self, url: Url) -> &mut Self
         where M: SoarMessage,
     {
         self.upstream.insert_http::<M>(url);
         self
     }
 
-    pub fn run(self) -> Addr<Self> {
-        let addr = self.start();
-        System::current().registry().set(addr.clone());
-        addr
+    pub fn add_http_remote_str<R>(&mut self, id: &str, url: Url) -> &mut Self
+    {
+        self.upstream.insert_http_str(id, url);
+        self
     }
-}
 
-
-impl<M> Handler<Internal<M>> for App
-    where M: SoarMessage
-{
-    type Result = SoarResponse<Internal<M>>;
-
-    fn handle(&mut self, msg: Internal<M>, _ctxt: &mut Context<Self>) -> Self::Result {
-        SoarResponse::from(self.client.send(msg.0))
+    pub fn make_current(&self) {
+        APP.with(|app| *app.write().unwrap() = self.clone());
     }
-}
 
-impl<M> Handler<Inbound<M>> for App
-    where M: SoarMessage
-{
-    type Result = SoarResponse<Inbound<M>>;
-
-    fn handle(&mut self, msg: Inbound<M>, _ctxt: &mut Context<Self>) -> Self::Result {
-        SoarResponse::from(self.server.send(msg.0))
+    fn send_local<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
+        where M: SoarMessage
+    {
+        self.client.send(msg)
     }
-}
 
-impl<M> Handler<Outbound<M>> for App
-    where M: SoarMessage
-{
-    type Result = SoarResponse<Outbound<M>>;
+    fn send_in<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
+        where M: SoarMessage
+    {
+        self.server.send(msg)
+    }
 
-    fn handle(&mut self, msg: Outbound<M>, _ctxt: &mut Context<Self>) -> Self::Result {
-        SoarResponse::from(self.upstream.send(msg.0))
+    fn send_out<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
+        where M: SoarMessage
+    {
+        self.upstream.send(msg)
     }
 }
 
@@ -104,27 +135,27 @@ pub fn send<M>(msg: M) -> impl Future<Item=M::Response, Error=Error>
 pub fn send_local<M>(msg: M) -> impl Future<Item=M::Response, Error=Error>
     where M: SoarMessage
 {
-    System::current().registry().get::<App>()
-        .send(Internal(msg))
-        .map_err(Error::from)
+    APP.with(|app| {
+        app.read().unwrap().send_local(msg)
+    })
 }
 
 
 pub fn send_in<M>(msg: M) -> impl Future<Item=M::Response, Error=Error>
     where M: SoarMessage
 {
-    System::current().registry().get::<App>()
-        .send(Inbound(msg))
-        .map_err(Error::from)
+    APP.with(|app| {
+        app.read().unwrap().send_in(msg)
+    })
 }
 
 
 pub fn send_out<M>(msg: M) -> impl Future<Item=M::Response, Error=Error>
     where M: SoarMessage
 {
-    System::current().registry().get::<App>()
-        .send(Outbound(msg))
-        .map_err(Error::from)
+    APP.with(|app| {
+        app.read().unwrap().send_out(msg)
+    })
 }
 
 
@@ -147,8 +178,8 @@ impl<M> Handler<M> for Passthrough
     }
 }
 
-pub fn no_client<M: SoarMessage>() -> Recipient<M> {
-    Passthrough::start_default().recipient()
+pub fn no_client<M: SoarMessage>() -> Result<Recipient<M>, Error> {
+    Ok(Passthrough::start_default().recipient())
 }
 
 #[derive(Default)]
@@ -173,8 +204,8 @@ impl<M> Handler<M> for EmptyServer
 }
 
 
-pub fn no_server<M: SoarMessage>() -> Recipient<M> {
-    EmptyServer::start_default().recipient()
+pub fn no_server<M: SoarMessage>() -> Result<Recipient<M>, Error> {
+    Ok(EmptyServer::start_default().recipient())
 }
 
 /// Internal messages are the default type for 
