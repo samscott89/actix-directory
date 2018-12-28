@@ -43,8 +43,11 @@ impl Actor for TestHandler {
 impl crate::service::Service for TestHandler {
 	fn add_to(self, app: &mut crate::app::App) -> &mut crate::app::App {
 		let addr = self.start();
-		app.add_server::<TestMessage, _, _>(Ok(addr.clone()))
-		   .add_server::<TestMessageEmpty, _, _>(Ok(addr.clone()))
+		app
+		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
+		   .route::<TestMessage, _>(addr.clone(), RouteType::Server)
+		   .route::<TestMessageEmpty, _>(addr.clone(), RouteType::Server)
+		   .route(("test", addr.clone()), RouteType::Server)
 	}
 }
 

@@ -5,8 +5,8 @@ pub mod http;
 mod router;
 pub mod service;
 
-pub use self::app::App;
-pub use self::router::StringifiedMessage;
+pub use self::app::{App, Routeable, RouteType};
+pub use self::router::{PendingRoute, StringifiedMessage};
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -69,26 +69,64 @@ mod tests {
 	use std::sync::mpsc;
 	use std::{time, thread};
 
+	use crate::*;
 	use crate::http::HttpSoarApp;
 	use crate::app;
 	use crate::test_helpers::*;
 	// use crate::Pending;
 
 	#[test]
-	fn test_service() {
+	fn test_route() {
 		init_logger();
 		let mut sys = actix::System::new("test-sys");
 
-		let handler = Ok(TestHandler::start_default());
-		let app = app::App::new()
-			.add_server::<TestMessage, _, _>(handler)
+		let handler = TestHandler::start_default();
+		app::App::new()
+			.route::<TestMessage, _>(handler, RouteType::Server)
 			.make_current();
 
 		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
 
-		let fut = app::send_out(TestMessage(42));
+		let fut = app::send_local(TestMessage(42));
+		let res = sys.block_on(fut);
+		assert!(res.is_err());
+	}
+
+	#[test]
+	fn test_service() {
+		init_logger();
+		let mut sys = actix::System::new("test-sys");
+
+		let handler = TestHandler::default();
+		app::App::new()
+			.service(handler)
+			.make_current();
+
+		let fut = app::send_in(TestMessage(42));
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.0, 42);
+
+		let fut = app::send_in(TestMessageEmpty);
+		let res = sys.block_on(fut).unwrap();
+	}
+
+	#[test]
+	fn test_stringly_route() {
+		init_logger();
+		let mut sys = actix::System::new("test-sys");
+
+		let handler = ("test", TestHandler::start_default());
+		app::App::new()
+			.route(handler, RouteType::Server)
+			.make_current();
+
+		let fut = app::send_in(crate::StringifiedMessage { id: "test".to_string(), inner: Vec::new()});
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.unwrap().id, "test_response");
+
+		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut);
 		assert!(res.is_err());
 	}
@@ -98,14 +136,14 @@ mod tests {
 		init_logger();
 		let mut sys = actix::System::new("test-sys");
 
-		let handler = TestHandler::start_default();
+		let handler = TestHandler::default();
 		app::App::new()
-			.add_server_str("test", handler)
+			.service(handler)
 			.make_current();
 
 		let fut = app::send_in(TestMessage(42));
-		let res = sys.block_on(fut);
-		assert!(res.is_err());
+		let res = sys.block_on(fut).unwrap();
+		assert_eq!(res.0, 42);
 
 		let fut = app::send_in(crate::StringifiedMessage { id: "test".to_string(), inner: Vec::new()});
 		let res = sys.block_on(fut).unwrap();
@@ -134,15 +172,15 @@ mod tests {
 			log::trace!("Create TestHandler");
 			TestHandler::start_default()
 		});
-		let app = app::App::new()
-			.add_server::<TestMessage, _, _>(fut)
+		app::App::new()
+			.route::<TestMessage, _>(PendingRoute::new(fut), RouteType::Server)
 			.make_current();
 
 		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
 
-		let fut = app::send_out(TestMessage(42));
+		let fut = app::send_local(TestMessage(42));
 		let res = sys.block_on(fut);
 		assert!(res.is_err());
 	}
@@ -158,9 +196,9 @@ mod tests {
 		    // actix_web::test::TestServer does some actix::System
 		    // shenanigans. Easier to run everything inside the closure.
 		    let server = TestServer::new(move |app| {
-		        let addr = Ok(TestHandler::start_default());
+		        let addr = TestHandler::default();
 		        let service = app::App::new()
-		            .add_server::<TestMessage, _, _>(addr)
+		            .service(addr)
 		            .make_current();
 		        app.message::<TestMessage>("/test");
 		    });
@@ -170,8 +208,8 @@ mod tests {
 	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
 
 	    let _service = app::App::new()
-	    	.add_client::<TestMessage, _, _>(app::no_client())
-	        .add_http_remote::<TestMessage>(url)
+	    	.service(TestHandler::default())
+	    	.route::<TestMessage, _>(url, RouteType::Upstream)
 	        .make_current();
 
 	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();

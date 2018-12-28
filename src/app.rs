@@ -4,10 +4,11 @@ use futures::{Future, IntoFuture};
 use serde_derive::{Deserialize, Serialize};
 use url::Url;
 
+use std::ops::Deref;
 use std::sync::RwLock;
 
-use crate::{SoarMessage, SoarResponse};
-use crate::router;
+use crate::{SoarMessage, SoarResponse, StringifiedMessage};
+use crate::{get_type, router, service};
 use crate::router::{Router, Upstream};
 
 thread_local!(
@@ -37,69 +38,59 @@ impl App {
         }
     }
 
-    pub fn add_client<M, F, R>(&mut self, client: F) -> &mut Self
+    /// Add a single route to the application
+    pub fn route<M, R>(&mut self, service: R, ty: RouteType) -> &mut Self
+        where R: Routeable<M>,
+              M: SoarMessage,
+    {
+        service.route(self, ty);
+        self
+
+    }
+
+    /// Add a service to the application, usually encapsulates mutliple routes
+    pub fn service<S: service::Service>(&mut self, service: S) -> &mut Self {
+        service.add_to(self)
+    }
+
+    /// Internal helper method to insert by route type
+    pub(crate) fn add_recip<M, R>(&mut self, service: R, ty: RouteType) -> &mut Self
         where M: SoarMessage,
-              F: IntoFuture<Item=R, Error=Error>,
-              F::Future: 'static + Send,
-              R: Into<Recipient<M>> + 'static,
+              R: 'static + Into<Recipient<M>>,
     {
-        let fut = client.into_future().map(|client| {
-            let client: Recipient<M> = client.into();
-            let client2 = client.clone();
-            APP.with(move |app| {
-                app.write().unwrap().add_client::<M, _, _>(Ok(client2));
-            });
-            client
-        });
-        let client = router::PendingRoute::new(fut);
-        self.client.insert(client.start().recipient());
+        log::trace!("Add route: {:?} -> {:?} on {:?}", get_type!(M), get_type!(R), ty);
+        match ty {
+            RouteType::Client => {
+                self.client.insert(service.into());
+            },
+            RouteType::Server => {
+                self.server.insert(service.into());
+            },
+            RouteType::Upstream => {
+                // unimplemented!()
+            },
+        };
         self
     }
 
-    pub fn add_client_str<R>(&mut self, id: &str, client: R) -> &mut Self
-        where R: Into<Recipient<crate::StringifiedMessage>>
-    {
-        self.client.insert_str(id, client.into());
-        self
-    }
 
-    pub fn add_server<M, F, R>(&mut self, server: F) -> &mut Self
-        where M: SoarMessage,
-              F: IntoFuture<Item=R, Error=Error>,
-              F::Future: 'static + Send,
-              R: Into<Recipient<M>> + 'static,
-
+    /// Internal helper method to insert by route type
+    pub(crate) fn add_str<R>(&mut self, id: &str, service: R, ty: RouteType) -> &mut Self
+        where R: 'static + Into<Recipient<crate::StringifiedMessage>>,
     {
-        let fut = server.into_future().map(|server| {
-            let server: Recipient<M> = server.into();
-            let server2 = server.clone();
-            APP.with(move |app| {
-                app.write().unwrap().add_server::<M, _, _>(Ok(server2));
-            });
-            server
-        });
-        let server = router::PendingRoute::new(fut);
-        self.server.insert(server.start().recipient());
-        self
-    }
+        log::trace!("Add route: {:?} -> {:?} on {:?}", id, get_type!(R), ty);
 
-    pub fn add_server_str<R>(&mut self, id: &str, client: R) -> &mut Self
-        where R: Into<Recipient<crate::StringifiedMessage>>
-    {
-        self.server.insert_str(id, client.into());
-        self
-    }
-
-    pub fn add_http_remote<M>(&mut self, url: Url) -> &mut Self
-        where M: SoarMessage,
-    {
-        self.upstream.insert_http::<M>(url);
-        self
-    }
-
-    pub fn add_http_remote_str<R>(&mut self, id: &str, url: Url) -> &mut Self
-    {
-        self.upstream.insert_http_str(id, url);
+        match ty {
+            RouteType::Client => {
+                self.client.insert_str(id, service.into());
+            },
+            RouteType::Server => {
+                self.server.insert_str(id, service.into());
+            },
+            RouteType::Upstream => {
+                // unimplemented!()
+            },
+        };
         self
     }
 
@@ -178,8 +169,8 @@ impl<M> Handler<M> for Passthrough
     }
 }
 
-pub fn no_client<M: SoarMessage>() -> Result<Recipient<M>, Error> {
-    Ok(Passthrough::start_default().recipient())
+pub fn no_client<M: SoarMessage>() -> Recipient<M> {
+    Passthrough::start_default().recipient()
 }
 
 #[derive(Default)]
@@ -204,8 +195,8 @@ impl<M> Handler<M> for EmptyServer
 }
 
 
-pub fn no_server<M: SoarMessage>() -> Result<Recipient<M>, Error> {
-    Ok(EmptyServer::start_default().recipient())
+pub fn no_server<M: SoarMessage>() -> Recipient<M> {
+    EmptyServer::start_default().recipient()
 }
 
 /// Internal messages are the default type for 
@@ -250,5 +241,105 @@ impl<M: SoarMessage> Message for Outbound<M> {
 
 impl<M: SoarMessage> SoarMessage for Outbound<M> {
     type Response = <M as Message>::Result;
+}
+
+
+#[derive(Copy, Clone, Debug)]
+pub enum RouteType {
+    Client,
+    Server,
+    Upstream,
+}
+
+trait Sealed { }
+
+pub trait Routeable<M> // + Sealed
+    where M: SoarMessage
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App;
+}
+
+impl<M> Routeable<M> for Recipient<M>
+    where M: SoarMessage,
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        app.add_recip(self, ty)
+    }
+}
+
+impl<A, M> Routeable<M> for Addr<A>
+    where M: SoarMessage,
+          A: Actor<Context=Context<A>> + Handler<M>,
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        app.add_recip(self, ty)
+    }
+}
+
+impl<M> Routeable<M> for router::PendingRoute<M>
+    where
+        M: SoarMessage,
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        Arbiter::spawn(self.fut.clone().map(move |recip| {
+            let recip = recip.deref().clone();
+            crate::app::APP.with(move |app| {
+                app.write().unwrap().add_recip(recip, ty);
+            });
+        }).map_err(|_| ()));
+        app.add_recip(self.start().recipient(), ty)
+    }
+}
+
+impl<R, M> Routeable<M> for R
+    where M: SoarMessage,
+          R: Into<router::Remote>
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        if let RouteType::Upstream = ty {
+            app.upstream.insert::<M>(self.into());
+        }
+        app
+    }
+}
+
+impl Routeable<StringifiedMessage> for (&str, Recipient<StringifiedMessage>)
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        app.add_str(self.0, self.1, ty)
+    }
+}
+
+impl<A> Routeable<StringifiedMessage> for (&str, Addr<A>)
+    where A: Actor<Context=Context<A>> + Handler<StringifiedMessage>,
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        app.add_str(self.0, self.1.recipient(), ty)
+    }
+}
+
+impl Routeable<StringifiedMessage> for (&str, router::PendingRoute<StringifiedMessage>)
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        let id = self.0.to_string();
+        Arbiter::spawn(self.1.fut.clone().map(move |recip| {
+            let recip = recip.deref().clone();
+            crate::app::APP.with(move |app| {
+                app.write().unwrap().add_str(&id, recip, ty);
+            });
+        }).map_err(|_| ()));
+        app.add_str(self.0, self.1.start().recipient(), ty)
+    }
+}
+
+impl<R> Routeable<StringifiedMessage> for (&str, R)
+    where R: Into<router::Remote>
+{
+    fn route(self, app: &mut App, ty: RouteType) -> &mut App {
+        if let RouteType::Upstream = ty {
+            app.upstream.insert_str(self.0, self.1.into());
+        }
+        app
+    }
 }
 
