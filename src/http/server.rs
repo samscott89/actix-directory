@@ -52,9 +52,9 @@ impl HttpFactory {
         (self.factory)(app)
     }
 
-    pub fn configure_cors<'a>(&self, app: &'a mut cors::CorsBuilder) -> &'a mut cors::CorsBuilder {
-        (self.factory_cors)(app)
-    }
+    // pub fn configure_cors<'a>(&self, app: &'a mut cors::CorsBuilder) -> &'a mut cors::CorsBuilder {
+    //     (self.factory_cors)(app)
+    // }
 
     #[cfg(test)]
     pub fn configure_test<'a>(&self, app: &'a mut actix_web::test::TestApp) -> &'a mut actix_web::test::TestApp {

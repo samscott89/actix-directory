@@ -109,7 +109,7 @@ pub fn init_logger() {
     START.call_once(|| {
     	if std::env::var("TEST_LOG").is_ok() {
 		    ::std::env::set_var("RUST_LOG", format!("actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
+		    env_logger::init();
     	}
-	    env_logger::init();
     });
 }

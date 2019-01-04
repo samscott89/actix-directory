@@ -57,14 +57,14 @@ impl App {
         let server = Router::with_name("server");
         let upstream = Upstream::new();
         Self {
-            client, server, upstream, http, 
+            client, server, upstream, http,
         }
     }
 
     /// Add a single route to the application
     ///
     /// The `service` should be anythign which implements `Routable`.
-    /// This can either be an `Addr<A>` for some actor `A: Actor + Handler<M>`, 
+    /// This can either be an `Addr<A>` for some actor `A: Actor + Handler<M>`,
     /// or a `Url` in the case of an upstream route, for example.
     ///
     /// For non-typed routes, you can provide the string identifier
@@ -298,7 +298,7 @@ pub enum RouteType {
 /// The `route` method is used for the `Routeable` to add itself to the application,
 /// in the appropriate way. For example, `Recipient<M>` is the core type for the routing table,
 /// but `Routeable` can be `Url`s, `Future`s, or even `(&str, Recipient)`.
-pub trait Routeable<M>
+pub trait Routeable<M>: Clone
     where M: MessageExt
 {
     fn route(self, app: &mut App, ty: RouteType);
@@ -321,24 +321,25 @@ impl<A, M> Routeable<M> for Addr<A>
     }
 }
 
-impl<M> Routeable<M> for router::PendingRoute<M>
+impl<R, M> Routeable<M> for router::PendingRoute<R, M>
     where
+        R: Routeable<M>,
         M: MessageExt,
 {
     fn route(self, app: &mut App, ty: RouteType)  {
-        Arbiter::spawn(self.fut.clone().map(move |recip| {
-            let recip = recip.deref().clone();
+        Arbiter::spawn(self.fut.clone().map(move |route| {
+            let route = route.deref().clone();
             crate::app::APP.with(move |app| {
-                app.borrow_mut().add_recip(recip, ty);
+                route.route(&mut app.borrow_mut(), ty);
             });
         }).map_err(|_| ()));
-        app.add_recip(self.start().recipient(), ty);
+        app.add_recip(self.set_type(ty).start().recipient(), ty);
     }
 }
 
 impl<R, M> Routeable<M> for R
     where M: MessageExt,
-          R: Into<router::Remote>
+          R: Into<router::Remote> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         if let RouteType::Upstream = ty {
@@ -362,22 +363,8 @@ impl<A> Routeable<StringifiedMessage> for (&str, Addr<A>)
     }
 }
 
-impl Routeable<StringifiedMessage> for (&str, router::PendingRoute<StringifiedMessage>)
-{
-    fn route(self, app: &mut App, ty: RouteType)  {
-        let id = self.0.to_string();
-        Arbiter::spawn(self.1.fut.clone().map(move |recip| {
-            let recip = recip.deref().clone();
-            crate::app::APP.with(move |app| {
-                app.borrow_mut().add_str(&id, recip, ty);
-            });
-        }).map_err(|_| ()));
-        app.add_str(self.0, self.1.start().recipient(), ty);
-    }
-}
-
 impl<R> Routeable<StringifiedMessage> for (&str, R)
-    where R: Into<router::Remote>
+    where R: Into<router::Remote> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         if let RouteType::Upstream = ty {
@@ -385,4 +372,20 @@ impl<R> Routeable<StringifiedMessage> for (&str, R)
         }
     }
 }
+
+impl<'a, A> Routeable<StringifiedMessage> for (&'a str, router::PendingRoute<Addr<A>, StringifiedMessage>)
+    where A: Actor<Context=Context<A>> + Handler<StringifiedMessage>,
+{
+    fn route(self, app: &mut App, ty: RouteType)  {
+        let id = self.0.to_string();
+        Arbiter::spawn(self.1.fut.clone().map(move |route| {
+            let route = route.deref().clone();
+            crate::app::APP.with(move |app| {
+                (id.as_str(), route).route(&mut app.borrow_mut(), ty);
+            });
+        }).map_err(|_| ()));
+        app.add_str(self.0, self.1.set_type(ty).start().recipient(), ty);
+    }
+}
+
 
