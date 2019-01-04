@@ -219,10 +219,11 @@ mod tests {
 		    // shenanigans. Easier to run everything inside the closure.
 		    let server = TestServer::new(move |app| {
 		        let addr = TestHandler::default();
-		        app::App::new()
-		            .service(addr)
-		            .make_current();
-		        app.message::<TestMessage>("/test");
+		        let ad_app = app::App::new()
+		            .service(addr);
+		        // sets up the http routes
+		        ad_app.configure_test(app);
+		        ad_app.make_current();
 		    });
 	        sender.send(server.url("/test")).unwrap();
 	    });

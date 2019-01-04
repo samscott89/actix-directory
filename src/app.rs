@@ -10,6 +10,7 @@ use std::ops::Deref;
 
 use crate::{MessageExt, FutResponse, StringifiedMessage};
 use crate::{get_type, router, service};
+use crate::http::HttpFactory;
 use crate::router::{Router, Upstream};
 
 thread_local!(
@@ -31,25 +32,32 @@ thread_local!(
 ///
 /// In order for most applications to work correcty, you should set this to be the current app,
 /// `app.make_current()`, and then can send messages via `actix_directory::app::send(...)`.
-#[derive(Default)]
 pub struct App {
     client: Router,
     server: Router,
     upstream: Upstream,
+    http: HttpFactory,
 }
 
 impl Actor for App {
     type Context = Context<Self>;
 }
 
+impl std::default::Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     /// Create a new application with empty routing tables
     pub fn new() -> Self {
+        let http = HttpFactory::new();
         let client = Router::with_name("client");
         let server = Router::with_name("server");
         let upstream = Upstream::new();
         Self {
-            client, server, upstream
+            client, server, upstream, http, 
         }
     }
 
@@ -77,6 +85,23 @@ impl App {
     /// Add a service to the application, usually encapsulates mutliple routes
     pub fn service<S: service::Service>(self, service: S) -> Self {
         service.add_to(self)
+    }
+
+    /// Expose the message `M` on HTTP endpoint `path`.
+    pub fn expose<M>(mut self, path: &str) -> Self
+        where M: MessageExt
+    {
+        self.http = self.http.route::<M>(path.to_string());
+        self
+    }
+
+    pub fn configure(&self, app: actix_web::App) -> actix_web::App {
+        self.http.configure(app)
+    }
+
+    #[cfg(test)]
+    pub fn configure_test<'a>(&self, app: &'a mut actix_web::test::TestApp) -> &'a mut actix_web::test::TestApp {
+        self.http.configure_test(app)
     }
 
     /// Internal helper method to insert by route type

@@ -47,6 +47,7 @@ impl crate::service::Service for TestHandler {
 		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
 		   .route::<TestMessage, _>(addr.clone(), RouteType::Server)
 		   .route::<TestMessageEmpty, _>(addr.clone(), RouteType::Server)
+		   .expose::<TestMessage>("/test")
 		   .route(("test", addr.clone()), RouteType::Server)
 	}
 }

@@ -7,6 +7,61 @@ use log::*;
 use crate::MessageExt;
 use crate::app;
 
+pub(crate) struct HttpFactory {
+    pub factory: Box<Fn(App) -> App>,
+    pub factory_cors: Box<Fn(&mut cors::CorsBuilder) -> &mut cors::CorsBuilder>,
+    #[cfg(test)]
+    pub factory_test: Box<Fn(&mut actix_web::test::TestApp) -> &mut actix_web::test::TestApp>,
+
+}
+
+impl Default for HttpFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HttpFactory {
+    pub fn new() -> Self {
+        HttpFactory {
+            factory: Box::new(|app| app),
+            factory_cors: Box::new(|app| app),
+            #[cfg(test)]
+            factory_test: Box::new(|app| app),
+        }
+    }
+
+    pub fn route<M: MessageExt>(self, path: String) -> Self {
+        let HttpFactory {
+            factory, factory_cors, 
+            #[cfg(test)]
+            factory_test,
+        } = self;
+        let path2 = path.clone();
+        #[cfg(test)]
+        let path3 = path.clone();
+        HttpFactory {
+            factory: Box::new(move |app| { (factory)(app).message::<M>(&path) }),
+            factory_cors: Box::new(move |app| { (factory_cors)(app).message::<M>(&path2) }),
+            #[cfg(test)]
+            factory_test: Box::new(move |app| { (factory_test)(app).message::<M>(&path3) }),
+        }
+    }
+
+    pub fn configure(&self, app: App) -> App {
+        (self.factory)(app)
+    }
+
+    pub fn configure_cors<'a>(&self, app: &'a mut cors::CorsBuilder) -> &'a mut cors::CorsBuilder {
+        (self.factory_cors)(app)
+    }
+
+    #[cfg(test)]
+    pub fn configure_test<'a>(&self, app: &'a mut actix_web::test::TestApp) -> &'a mut actix_web::test::TestApp {
+        (self.factory_test)(app)
+    }
+}
+
 /// An `HttpApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
 ///
