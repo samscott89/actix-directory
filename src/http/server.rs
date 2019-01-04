@@ -4,12 +4,14 @@ use failure::Error;
 use futures::{future, Future};
 use log::*;
 
-use crate::SoarMessage;
+use crate::MessageExt;
 use crate::app;
 
-/// An `HttpSoarApp` is ultimately used to extend an `actix_web::App`,
+/// An `HttpApp` is ultimately used to extend an `actix_web::App`,
 /// by adding the method `message`.
-pub trait HttpSoarApp {
+///
+/// TODO: This should really use content-encoding to differentiate between json/bincode/etc.
+pub trait HttpApp {
 
 	/// Register the path `path` as able to respond to requests for the
 	/// message type `M`.
@@ -17,50 +19,50 @@ pub trait HttpSoarApp {
 	/// this handler must have been previously registered.
 	fn message<M>(self, path: &str) -> Self
 		where
-		    M: SoarMessage;
+		    M: MessageExt;
 
     fn jmessage<M>(self, path: &str) -> Self
         where
-            M: SoarMessage;
+            M: MessageExt;
 }
 
-impl HttpSoarApp for App {
+impl HttpApp for App {
 	fn message<M>(self, path: &str) -> Self
 		where
-		    M: SoarMessage,
+		    M: MessageExt,
 	{
 		self.route(path, http::Method::POST, handle_request::<M>)
 	}
 
     fn jmessage<M>(self, path: &str) -> Self
         where
-            M: SoarMessage,
+            M: MessageExt,
     {
         self.route(path, http::Method::POST, handle_json_request::<M>)
     }
 }
 
-impl HttpSoarApp for &mut cors::CorsBuilder {
+impl HttpApp for &mut cors::CorsBuilder {
     fn message<M>(self, path: &str) -> Self
         where
-            M: SoarMessage,
+            M: MessageExt,
     {
         self.resource(path, |r| r.post().with(handle_request::<M>))
     }
 
     fn jmessage<M>(self, path: &str) -> Self
         where
-            M: SoarMessage,
+            M: MessageExt,
     {
         self.resource(path, |r| r.post().with(handle_json_request::<M>))
     }
 
 }
 #[cfg(test)]
-impl HttpSoarApp for &mut actix_web::test::TestApp {
+impl HttpApp for &mut actix_web::test::TestApp {
 	fn message<M>(self, path: &str) -> Self
 		where
-		    M: SoarMessage
+		    M: MessageExt
 	{
 		trace!("TEST: Handle message");
         self.resource(path, |r| r.post().with(handle_request::<M>))
@@ -68,7 +70,7 @@ impl HttpSoarApp for &mut actix_web::test::TestApp {
 
     fn jmessage<M>(self, path: &str) -> Self
         where
-            M: SoarMessage
+            M: MessageExt
     {
         trace!("TEST: Handle message");
         self.resource(path, |r| r.post().with(handle_json_request::<M>))
@@ -81,11 +83,13 @@ fn handle_json_request<M: 'static>(
     req: HttpRequest,
 ) -> impl actix_web::Responder
     where
-        M: SoarMessage
+        M: MessageExt
 {
     req.json().map_err(Error::from)
-        .and_then(move |req: M| 
-            app::send_in(req).map_err(Error::from))
+        .and_then(move |req: M|  {
+            trace!("Forwarding message to local handler");
+            app::send_in(req).map_err(Error::from)
+        })
         .map(|resp| {
             trace!("Handled request successfully");
             HttpResponse::Ok().json(resp)
@@ -97,13 +101,16 @@ fn handle_request<M: 'static>(
     req: HttpRequest,
 ) -> impl actix_web::Responder
 	where
-	    M: SoarMessage
+	    M: MessageExt
 {
     req.body().map_err(Error::from)
     	.and_then(|body| {
     		bincode::deserialize(&body).map_err(Error::from)
     	})
-        .and_then(move |req: M| app::send_in(req).map_err(Error::from))
+        .and_then(move |req: M| {
+            trace!("Forwarding message to local handler");
+            app::send_in(req).map_err(Error::from)
+        })
         .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");

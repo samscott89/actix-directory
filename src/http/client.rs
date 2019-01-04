@@ -9,9 +9,9 @@ use url::Url;
 
 use std::marker::PhantomData;
 
-use crate::{SoarMessage, SoarResponse};
+use crate::{MessageExt, FutResponse};
 
-impl<M: SoarMessage> From<Url> for HttpHandler<M> {
+impl<M: MessageExt> From<Url> for HttpHandler<M> {
     fn from(other: Url) -> Self {
         HttpHandler(other, PhantomData)
     }
@@ -26,8 +26,8 @@ impl<M: 'static> Actor for HttpHandler<M> {
     type Context = Context<Self>;
 }
 
-impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
-    type Result = SoarResponse<M>;
+impl<M: MessageExt> Handler<M> for HttpHandler<M> {
+    type Result = FutResponse<M>;
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         let url = self.0.clone();
@@ -50,12 +50,12 @@ impl<M: SoarMessage> Handler<M> for HttpHandler<M> {
                 })
         });
         
-        SoarResponse(Box::new(fut))
+        FutResponse(Box::new(fut))
     }
 }
 
 pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
-    where M: SoarMessage,
+    where M: MessageExt,
 {
     // let path = url.path().to_string();
     let msg = bincode::serialize(&msg).map_err(Error::from);

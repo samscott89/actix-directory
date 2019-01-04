@@ -18,7 +18,7 @@ impl Message for TestMessage {
 	type Result = TestResponse;
 }
 
-impl SoarMessage for TestMessage {
+impl MessageExt for TestMessage {
 	type Response = TestResponse;
 }
 
@@ -29,7 +29,7 @@ impl Message for TestMessageEmpty {
 	type Result = ();
 }
 
-impl SoarMessage for TestMessageEmpty {
+impl MessageExt for TestMessageEmpty {
 	type Response = ();
 }
 
@@ -41,7 +41,7 @@ impl Actor for TestHandler {
 }
 
 impl crate::service::Service for TestHandler {
-	fn add_to(self, app: &mut crate::app::App) -> &mut crate::app::App {
+	fn add_to(self, app: crate::app::App) -> crate::app::App {
 		let addr = self.start();
 		app
 		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
@@ -96,18 +96,18 @@ impl Actor for TestIntoHandler {
 }
 
 impl Handler<TestMessageEmpty> for TestIntoHandler {
-	type Result = SoarResponse<TestMessageEmpty>;
+	type Result = FutResponse<TestMessageEmpty>;
 
 	fn handle(&mut self, _msg: TestMessageEmpty, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessageEmpty from TestIntoHandler");
-		SoarResponse(Box::new(app::send(TestMessage(42)).map(|_| ())))
+		FutResponse(Box::new(app::send(TestMessage(42)).map(|_| ())))
 	}
 }
 
 pub fn init_logger() {
     START.call_once(|| {
     	if std::env::var("TEST_LOG").is_ok() {
-		    ::std::env::set_var("RUST_LOG", format!("actix_web={1},actix={0},soar={1}", "trace", "trace"));
+		    ::std::env::set_var("RUST_LOG", format!("actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
     	}
 	    env_logger::init();
     });

@@ -1,5 +1,23 @@
 #![cfg_attr(feature="print_types", feature(core_intrinsics))]
 
+
+//! actix-directory is designed to enable building distributed applications
+//! using the Actix framework.
+//!
+//! The idea is to abstract services into a client/server model, and then provide simple
+//! message handlers for these messages. Such that requests can be made over HTTP/REST or RPC
+//! connections.
+//!
+//! The core of this is a routing table which either maps types to endpoints, or strings to endpoints.
+//! The former is for apps with centrally defined messages (i.e. all defined in a single library),
+//! whereas the latter is useful for extending functionality.
+//!
+//! Essentially, actix-directory simplifies sending messages. If an app wants some service to handle
+//! a `MessageRequest`, it simply uses `app::send(MessageReq { ... })`, which looks up the correct client
+//! implementation (running locally), and makes the request to the remote server.
+//!
+//! Future ideas include adding service discovery/proxies as a supported endpoint.
+
 pub mod app;
 pub mod http;
 mod router;
@@ -19,32 +37,36 @@ use serde::{de::DeserializeOwned, Serialize};
 /// Helper type for messages (`actix::Message`) which can be processed by `soar`.
 /// Requires the inputs/outputs to be de/serializable so that they can be sent over
 /// a network.
-pub trait SoarMessage:
-    Message<Result=<Self as SoarMessage>::Response>
+pub trait MessageExt:
+    Message<Result=<Self as MessageExt>::Response>
     + 'static + Send + DeserializeOwned + Serialize
 {
     type Response: 'static + Send + DeserializeOwned + Serialize;
 }
 
-/// Wrapper type for a response to a `SoarMessage`. 
+/// Wrapper type for a response to a `MessageExt`. 
 /// Since this implements `actix::MessageResponse`, we can use it as the return type from
-/// a `Handler` implementation. 
-pub struct SoarResponse<M: SoarMessage>(pub Box<Future<Item=M::Response, Error=Error>>);
+/// a `Handler` implementation.
+///
+/// Note, this is often two levels of errors. The outer error encapsulates the directory
+/// errors - missing routes, failed connections etc., and the inner errors are from
+/// of `M::Response`,  corresponding to the app-level error.
+pub struct FutResponse<M: MessageExt>(pub Box<Future<Item=M::Response, Error=Error>>);
 
-impl<F, M> From<F> for SoarResponse<M>
+impl<F, M> From<F> for FutResponse<M>
     where
-        M: SoarMessage, 
+        M: MessageExt, 
         F: 'static + Future<Item=M::Response, Error=Error>,
 {
     fn from(other: F) -> Self {
-        SoarResponse(Box::new(other))
+        FutResponse(Box::new(other))
     }
 }
 
-impl<A, M> MessageResponse<A, M> for SoarResponse<M>
+impl<A, M> MessageResponse<A, M> for FutResponse<M>
     where 
         A: Actor<Context=Context<A>>,
-        M: SoarMessage,
+        M: MessageExt,
 {
     fn handle<R: ResponseChannel<M>>(self, _ctxt: &mut Context<A>, tx: Option<R>) {
         Arbiter::spawn(self.0.and_then(move |res| {
@@ -70,7 +92,7 @@ mod tests {
 	use std::{time, thread};
 
 	use crate::*;
-	use crate::http::HttpSoarApp;
+	use crate::http::HttpApp;
 	use crate::app;
 	use crate::test_helpers::*;
 	// use crate::Pending;
@@ -109,7 +131,7 @@ mod tests {
 		assert_eq!(res.0, 42);
 
 		let fut = app::send_in(TestMessageEmpty);
-		let res = sys.block_on(fut).unwrap();
+		let _res = sys.block_on(fut).unwrap();
 	}
 
 	#[test]
@@ -197,7 +219,7 @@ mod tests {
 		    // shenanigans. Easier to run everything inside the closure.
 		    let server = TestServer::new(move |app| {
 		        let addr = TestHandler::default();
-		        let service = app::App::new()
+		        app::App::new()
 		            .service(addr)
 		            .make_current();
 		        app.message::<TestMessage>("/test");
@@ -209,6 +231,7 @@ mod tests {
 
 	    let _service = app::App::new()
 	    	.service(TestHandler::default())
+	    	.route::<TestMessage, _>(app::no_client(), RouteType::Client)
 	    	.route::<TestMessage, _>(url, RouteType::Upstream)
 	        .make_current();
 
