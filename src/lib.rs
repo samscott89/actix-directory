@@ -34,6 +34,10 @@ use failure::Error;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 
+pub mod prelude {
+	pub use crate::{app, http::HttpApp, service::Service, App, Routeable, RouteType, PendingRoute, StringifiedMessage,};
+}
+
 /// Helper type for messages (`actix::Message`) which can be processed by `soar`.
 /// Requires the inputs/outputs to be de/serializable so that they can be sent over
 /// a network.
@@ -91,11 +95,8 @@ mod tests {
 	use std::sync::mpsc;
 	use std::{time, thread};
 
-	use crate::*;
-	use crate::http::HttpApp;
-	use crate::app;
+	use crate::prelude::*;
 	use crate::test_helpers::*;
-	// use crate::Pending;
 
 	#[test]
 	fn test_route() {
