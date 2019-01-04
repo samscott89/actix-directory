@@ -321,9 +321,9 @@ impl<A, M> Routeable<M> for Addr<A>
     }
 }
 
-impl<R, M> Routeable<M> for router::PendingRoute<R, M>
+impl<R, M> Routeable<M> for router::PendingRoute<R>
     where
-        R: Routeable<M>,
+        R: 'static + Routeable<M>,
         M: MessageExt,
 {
     fn route(self, app: &mut App, ty: RouteType)  {
@@ -373,8 +373,10 @@ impl<R> Routeable<StringifiedMessage> for (&str, R)
     }
 }
 
-impl<'a, A> Routeable<StringifiedMessage> for (&'a str, router::PendingRoute<Addr<A>, StringifiedMessage>)
-    where A: Actor<Context=Context<A>> + Handler<StringifiedMessage>,
+impl<R> Routeable<StringifiedMessage> for (&str, router::PendingRoute<R>)
+    where
+        for<'a> (&'a str, R): Routeable<StringifiedMessage>,
+        R: 'static + Routeable<StringifiedMessage> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         let id = self.0.to_string();

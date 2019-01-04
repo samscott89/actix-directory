@@ -4,8 +4,6 @@ use ::actix::dev::*;
 use failure::Error;
 use futures::{future, future::Either, Future};
 
-use std::marker::PhantomData;
-
 use crate::{app, MessageExt, FutResponse, Routeable, RouteType};
 use super::RouterError;
 
@@ -13,54 +11,39 @@ use super::RouterError;
 /// - Scheduling incoming messages to be handled once the future resolves.
 /// - Add the resolved recipient to the routing table
 /// This is done through the `Routeable` implementation.
-pub struct PendingRoute<R, M>
-    where
-        R: 'static + Routeable<M>,
-        M: MessageExt,
+pub struct PendingRoute<R>
 {
     pub(crate) fut: future::Shared<Box<Future<Item=R, Error=Error> + Send>>,
     ty: Option<RouteType>,
-    _marker: PhantomData<M>,
 }
 
-impl<R, M> Clone for PendingRoute<R, M>
-    where
-        R: 'static + Routeable<M>,
-        M: MessageExt,
+impl<R> Clone for PendingRoute<R>
 {
     fn clone(&self) -> Self {
         PendingRoute {
             fut: self.fut.clone(),
             ty: self.ty,
-            _marker: PhantomData,
         }
     }
 }
 
-impl<R, M> Actor for PendingRoute<R, M>
-    where
-        R: 'static + Routeable<M>,
-        M: MessageExt,
+impl<R: 'static> Actor for PendingRoute<R>
 {
     type Context = actix::Context<Self>;
 }
 
-impl<R, M> PendingRoute<R, M>
-    where
-        R: 'static + Routeable<M>,
-        M: MessageExt,
+impl<R> PendingRoute<R>
 {
     pub fn new<F>(fut: F) -> Self
         where
             F: 'static + Future<Item=R, Error=Error> + Send
     {
-        let fut: Box<Future<Item=R, Error=Error> + Send> = Box::new(fut.map(|r| r.into()));
+        let fut: Box<Future<Item=R, Error=Error> + Send> = Box::new(fut);
         let shared = fut.shared();
 
         Self {
             fut: shared,
             ty: None,
-            _marker: PhantomData,
         }
     }
 
@@ -70,7 +53,7 @@ impl<R, M> PendingRoute<R, M>
     }
 }
 
-impl<R, M> Handler<M> for PendingRoute<R, M>
+impl<R, M> Handler<M> for PendingRoute<R>
     where
         R: 'static + Routeable<M>,
         M: MessageExt,
