@@ -91,18 +91,22 @@ impl App {
     pub fn expose<M>(mut self, path: &str) -> Self
         where M: MessageExt
     {
-        self.http = self.http.route::<M>(path.to_string());
+        self.http.route::<M>(path.to_string());
         self
     }
 
-    pub fn configure(&self, app: actix_web::App) -> actix_web::App {
-        self.http.configure(app)
+    // pub fn configure(&self, app: actix_web::App<Addr<app::ServerIn>>) -> actix_web::App<Addr<app::ServerIn>> {
+    //     self.http.configure(app)
+    // }
+
+    pub fn get_factory(&self) -> HttpFactory {
+        self.http.clone()
     }
 
-    #[cfg(test)]
-    pub fn configure_test<'a>(&self, app: &'a mut actix_web::test::TestApp) -> &'a mut actix_web::test::TestApp {
-        self.http.configure_test(app)
-    }
+    // #[cfg(test)]
+    // pub fn get_configure_test<'a>(&self) -> Box<FnOnce(&mut actix_web::test::TestApp<Addr<ServerIn>>) -> &mut actix_web::test::TestApp<Addr<ServerIn>> + Send> {
+    //     self.http.factory_test
+    // }
 
     /// Internal helper method to insert by route type
     pub(crate) fn add_recip<M, R>(&mut self, service: R, ty: RouteType) -> &mut Self
@@ -179,6 +183,16 @@ impl App {
     {
         self.upstream.send(msg)
     }
+
+    /// Helper function to create a new actix_web application with the routes preconfigured
+    pub fn http_server(&self) -> impl Fn() -> actix_web::App<Addr<ServerIn>> + Clone {
+        let addr = ServerIn::start_default();
+        let factory = self.http.clone();
+        move || {
+            let app = actix_web::App::with_state(addr.clone());
+            factory.clone().configure(app)
+        }
+    }
 }
 
 /// Send a message on the default channel (a local message via the client)
@@ -216,7 +230,24 @@ pub fn send_out<M>(msg: M) -> impl Future<Item=M::Response, Error=Error>
     })
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ServerIn;
 
+impl Actor for ServerIn {
+    type Context = Context<Self>;
+}
+
+impl<M> Handler<M> for ServerIn
+    where M: MessageExt,
+{
+    type Result = FutResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        log::trace!("Handling request for server in on thread: {:?}", std::thread::current().id());
+        let res = send_in(msg).map_err(Error::from);
+        FutResponse(Box::new(res))
+    }
+}
 
 #[derive(Default)]
 struct Passthrough;
@@ -235,6 +266,7 @@ impl<M> Handler<M> for Passthrough
         FutResponse(Box::new(res))
     }
 }
+
 
 /// This is a simple client implementation which will just forward all
 /// messages to the upstream handler.

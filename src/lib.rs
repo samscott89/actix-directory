@@ -82,12 +82,10 @@ impl<A, M> MessageResponse<A, M> for FutResponse<M>
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 	use actix::{Actor, System};
-	// use actix_web::server;
-	use actix_web::test::TestServer;
+	use actix_web::server;
 	use failure::Error;
 	use futures::Future;
 	use url::Url;
@@ -212,22 +210,21 @@ mod tests {
 	fn test_http_service() {
 	    init_logger();
 	    let mut sys = System::new("test_client");
-
 	    let (sender, receiver) = mpsc::sync_channel(1);
-
-	    std::thread::spawn(move || {
-		    // actix_web::test::TestServer does some actix::System
-		    // shenanigans. Easier to run everything inside the closure.
-		    let server = TestServer::new(move |app| {
-		        let addr = TestHandler::default();
-		        let ad_app = app::App::new()
-		            .service(addr);
-		        // sets up the http routes
-		        ad_app.configure_test(app);
-		        ad_app.make_current();
-		    });
-	        sender.send(server.url("/test")).unwrap();
+	    thread::spawn(move || {
+		    let sys = System::new("test_server");
+	        let addr = TestHandler::default();
+	        let ad_app = app::App::new()
+	            .service(addr);
+	       	let app_fact = ad_app.http_server().clone();
+	        ad_app.make_current();
+	        let server = server::new(app_fact).bind("localhost:0").unwrap();
+	        sender.send(format!("http://{}/test", server.addrs()[0])).unwrap();
+	        server.start();
+	        sys.run();
 	    });
+
+	    thread::sleep(time::Duration::from_millis(100));
 
 	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
 

@@ -4,4 +4,5 @@ mod client;
 mod server;
 
 pub use self::client::*;
-pub use self::server::*;
+pub use self::server::HttpApp;
+pub(crate) use self::server::*;
