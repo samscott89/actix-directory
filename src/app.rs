@@ -11,7 +11,7 @@ use std::ops::Deref;
 use crate::{MessageExt, FutResponse, StringifiedMessage};
 use crate::{get_type, router, service};
 use crate::http::HttpFactory;
-use crate::router::{Router, Upstream};
+use crate::router::Router;
 
 thread_local!(
     /// Each thread maintains its own `App` struct, which is basically
@@ -35,7 +35,7 @@ thread_local!(
 pub struct App {
     client: Router,
     server: Router,
-    upstream: Upstream,
+    upstream: Router,
     http: HttpFactory,
 }
 
@@ -55,7 +55,7 @@ impl App {
         let http = HttpFactory::new();
         let client = Router::with_name("client");
         let server = Router::with_name("server");
-        let upstream = Upstream::new();
+        let upstream = Router::with_name("upstream");
         Self {
             client, server, upstream, http,
         }
@@ -122,8 +122,7 @@ impl App {
                 self.server.insert(service.into());
             },
             RouteType::Upstream => {
-                log::error!("Attempted to add a local service as an upstream route. This isn't currently supported");
-                // unimplemented!()
+                self.upstream.insert(service.into());
             },
         };
         self
@@ -144,7 +143,7 @@ impl App {
                 self.server.insert_str(id, service.into());
             },
             RouteType::Upstream => {
-                log::error!("Attempted to add a local service as an upstream route. This isn't currently supported");
+                self.upstream.insert_str(id, service.into());
             },
         };
         self
@@ -374,9 +373,7 @@ impl<R, M> Routeable<M> for R
           R: Into<router::Remote> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
-        if let RouteType::Upstream = ty {
-            app.upstream.insert::<M>(self.into());
-        }
+        Routeable::<M>::route(self.into().start(), app, ty)
     }
 }
 
@@ -399,9 +396,7 @@ impl<R> Routeable<StringifiedMessage> for (&str, R)
     where R: Into<router::Remote> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
-        if let RouteType::Upstream = ty {
-            app.upstream.insert_str(self.0, self.1.into());
-        }
+        (self.0, self.1.into().start()).route(app, ty)
     }
 }
 

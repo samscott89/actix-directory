@@ -15,7 +15,7 @@ mod pending;
 mod upstream;
 
 pub use self::pending::PendingRoute;
-pub use self::upstream::{Remote, Upstream};
+pub use self::upstream::Remote;
 
 /// A lookup from `Message` types to addresses to request handlers.
 /// This is encapsulated by an `AnyMap`, but the method `insert_handler`, 
