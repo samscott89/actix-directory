@@ -24,6 +24,7 @@ fn message<M, H>(app: H, path: &str) -> H
         M: MessageExt,
         H: HttpApp
 {
+    trace!("Exposing message {:?} on path: {}", crate::get_type!(M), path);
     app.message::<M>(&path)
 }
 
