@@ -4,12 +4,12 @@ use ::actix::dev::*;
 use failure::{Error, Fail};
 use futures::{future, Future, IntoFuture};
 use log::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use std::any::Any;
 use std::collections::HashMap;
 
-use crate::{get_type, MessageExt};
+use crate::{get_type, MessageExt, OpaqueMessage};
 
 mod pending;
 mod upstream;
@@ -24,7 +24,7 @@ pub use self::upstream::Remote;
 pub struct Router {
     pub name: String,
     pub routes: anymap::AnyMap,
-    pub str_routes: HashMap<String, Recipient<StringifiedMessage>>,
+    pub str_routes: HashMap<String, Recipient<OpaqueMessage>>,
     #[cfg(feature="debugging_info")]
     _info: Vec<String>,
 }
@@ -66,14 +66,14 @@ impl Router {
         self._info.push(format!("{:?}", get_type!(M)));
     }
 
-    pub fn insert_str(&mut self, id: &str, handler: Recipient<StringifiedMessage>) {
+    pub fn insert_str(&mut self, id: &str, handler: Recipient<OpaqueMessage>) {
         self.str_routes.insert(id.to_string(), handler);
         #[cfg(feature="debugging_info")]
         self._info.push(id.to_string());
     }
 
     /// Get the handler identified by the generic type parameter `M`.
-    pub fn get_str(&self, id: &str) -> Option<Recipient<StringifiedMessage>>
+    pub fn get_str(&self, id: &str) -> Option<Recipient<OpaqueMessage>>
     {
         trace!("Lookup request handler for {:?}", id);
         self.str_routes.get(id).cloned()
@@ -95,7 +95,7 @@ impl Router {
         // route.
         //
         // Otherwise, use the regular routes for findin the handler.
-        match Any::downcast_ref::<StringifiedMessage>(&msg) {
+        match Any::downcast_ref::<OpaqueMessage>(&msg) {
             Some(m) => {
                 trace!("Sending string-typed message with id: {}", m.id);
                 let recip = self.get_str(&m.id)
@@ -110,7 +110,7 @@ impl Router {
                     recip
                         .and_then(|r| {
                             // At this point we are just throwing away information
-                            // Since we go M -> StringifiedMessage, but Recipient<StringifiedMessage> -> Recipient<M>
+                            // Since we go M -> OpaqueMessage, but Recipient<OpaqueMessage> -> Recipient<M>
                             let r = Any::downcast_ref::<Recipient<M>>(&r).unwrap();
                             r.clone().send(msg).map_err(Error::from)
                         }))
@@ -135,22 +135,3 @@ impl Router {
 #[fail(display = "routing error found")]
 /// `Router` fails when there is no known handler for a given message.
 pub struct RouterError {}
-
-
-/// To permit extending the base app, a `StringifiedMessage` type can be used,
-/// which specifies the type of the message with a string, and contains the
-/// serialized inner bytes.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StringifiedMessage {
-    pub id: String,
-    pub inner: Vec<u8>,
-}
-
-impl Message for StringifiedMessage {
-    type Result = Result<StringifiedMessage, StringifiedMessage>;
-}
-
-impl MessageExt for StringifiedMessage {
-    type Response = <Self as Message>::Result;
-}
-

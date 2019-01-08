@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::ops::Deref;
 // use std::sync::RwLock;
 
-use crate::{MessageExt, FutResponse, StringifiedMessage};
+use crate::{MessageExt, FutResponse, OpaqueMessage};
 use crate::{get_type, router, service};
 use crate::http::HttpFactory;
 use crate::router::Router;
@@ -37,6 +37,7 @@ pub struct App {
     server: Router,
     upstream: Router,
     http: HttpFactory,
+    rpc: crate::rpc::RpcHandler,
 }
 
 impl Actor for App {
@@ -56,8 +57,9 @@ impl App {
         let client = Router::with_name("client");
         let server = Router::with_name("server");
         let upstream = Router::with_name("upstream");
+        let rpc = crate::rpc::RpcHandler::new();
         Self {
-            client, server, upstream, http,
+            client, server, upstream, http, rpc,
         }
     }
 
@@ -73,7 +75,7 @@ impl App {
     /// Note that generally you will need to specify the message type
     /// i.e `app.route::<SomeMessage, _>(addr, RouteType::Client)`.
     /// Except for when specifying stringly typed message extensions,
-    /// in which case the type can be inferred to be `StringifiedMessage`.
+    /// in which case the type can be inferred to be `OpaqueMessage`.
     pub fn route<M, R>(mut self, service: R, ty: RouteType) -> Self
         where R: Routeable<M>,
               M: MessageExt,
@@ -88,10 +90,10 @@ impl App {
     }
 
     /// Expose the message `M` on HTTP endpoint `path`.
-    pub fn expose<M>(mut self, path: &str) -> Self
+    pub fn expose<M>(mut self) -> Self
         where M: MessageExt
     {
-        self.http.route::<M>(path.to_string());
+        self.http.route::<M>();
         self
     }
 
@@ -116,22 +118,30 @@ impl App {
         log::trace!("Add route: {:?} -> {:?} on {:?}", get_type!(M), get_type!(R), ty);
         match ty {
             RouteType::Client => {
+                if let Some(path)= M::PATH {
+                    self.rpc.client::<M>(path);
+                }
                 self.client.insert(service.into());
             },
             RouteType::Server => {
+                if let Some(path)= M::PATH {
+                    self.rpc.server::<M>(path);
+                }
                 self.server.insert(service.into());
             },
             RouteType::Upstream => {
+                if let Some(path)= M::PATH {
+                    self.rpc.upstream::<M>(path);
+                }
                 self.upstream.insert(service.into());
             },
         };
         self
     }
 
-
     /// Internal helper method to insert by route type
     pub(crate) fn add_str<R>(&mut self, id: &str, service: R, ty: RouteType) -> &mut Self
-        where R: 'static + Into<Recipient<crate::StringifiedMessage>>,
+        where R: 'static + Into<Recipient<crate::OpaqueMessage>>,
     {
         log::trace!("Add route: {:?} -> {:?} on {:?}", id, get_type!(R), ty);
 
@@ -151,6 +161,7 @@ impl App {
 
     /// Set this application to be the current application default.
     pub fn make_current(self) {
+        self.rpc.build();
         APP.with(|app| app.replace(self));
     }
 
@@ -377,22 +388,22 @@ impl<R, M> Routeable<M> for R
     }
 }
 
-impl Routeable<StringifiedMessage> for (&str, Recipient<StringifiedMessage>)
+impl Routeable<OpaqueMessage> for (&str, Recipient<OpaqueMessage>)
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         app.add_str(self.0, self.1, ty);
     }
 }
 
-impl<A> Routeable<StringifiedMessage> for (&str, Addr<A>)
-    where A: Actor<Context=Context<A>> + Handler<StringifiedMessage>,
+impl<A> Routeable<OpaqueMessage> for (&str, Addr<A>)
+    where A: Actor<Context=Context<A>> + Handler<OpaqueMessage>,
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         app.add_str(self.0, self.1.recipient(), ty);
     }
 }
 
-impl<R> Routeable<StringifiedMessage> for (&str, R)
+impl<R> Routeable<OpaqueMessage> for (&str, R)
     where R: Into<router::Remote> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
@@ -400,10 +411,10 @@ impl<R> Routeable<StringifiedMessage> for (&str, R)
     }
 }
 
-impl<R> Routeable<StringifiedMessage> for (&str, router::PendingRoute<R>)
+impl<R> Routeable<OpaqueMessage> for (&str, router::PendingRoute<R>)
     where
-        for<'a> (&'a str, R): Routeable<StringifiedMessage>,
-        R: 'static + Routeable<StringifiedMessage> + Clone
+        for<'a> (&'a str, R): Routeable<OpaqueMessage>,
+        R: 'static + Routeable<OpaqueMessage> + Clone
 {
     fn route(self, app: &mut App, ty: RouteType)  {
         let id = self.0.to_string();

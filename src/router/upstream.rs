@@ -1,14 +1,7 @@
 use actix::prelude::*;
-use failure::Error;
-use futures::{Future, IntoFuture};
-use log::*;
 use url::Url;
 
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
-
-use crate::{http, FutResponse, MessageExt};
-use super::{get_type, RouterError, StringifiedMessage};
+use crate::{http, rpc, FutResponse, MessageExt};
 
 impl From<Url> for Remote {
     fn from(other: Url) -> Remote {
@@ -21,6 +14,7 @@ impl From<Url> for Remote {
 pub enum Remote
 {
     Http(url::Url),
+    LocalRpc(String),
     // later: RPC as well,
 }
 
@@ -35,6 +29,7 @@ impl<M> Handler<M> for Remote
     fn handle(&mut self, msg: M, _ctxt: &mut Self::Context) -> Self::Result {
         match self {
             Remote::Http(url) => FutResponse::from(http::send(&msg, url.clone())),
+            Remote::LocalRpc(path) => FutResponse::from(rpc::send(msg, path)),
         }
     }
 }

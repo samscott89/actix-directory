@@ -8,7 +8,7 @@ use crate::MessageExt;
 use crate::app;
 
 type AdApp = App<Addr<app::ServerIn>>;
-type AppFactory = fn(AdApp, &str) -> AdApp;
+type AppFactory = fn(AdApp) -> AdApp;
 
 
 /// Used to create a list of functions to apply to a `actix_web::App`
@@ -16,16 +16,22 @@ type AppFactory = fn(AdApp, &str) -> AdApp;
 #[derive(Clone)]
 pub struct HttpFactory
 {
-    pub factory: Vec<(AppFactory, String)>,
+    pub factory: Vec<AppFactory>,
 }
 
-fn message<M, H>(app: H, path: &str) -> H
+fn message<M, H>(mut app: H) -> H
     where
         M: MessageExt,
         H: HttpApp
 {
-    trace!("Exposing message {:?} on path: {}", crate::get_type!(M), path);
-    app.message::<M>(&path)
+    trace!("Exposing message {:?} on path: {:?}", crate::get_type!(M), M::PATH);
+    if let Some(path) = M::PATH {
+        app = app.message::<M>(path);
+    } else {
+        info!("Message type {:?} does not have a path", crate::get_type!(M));
+    }
+    app
+    
 }
 
 impl Default for HttpFactory {
@@ -41,14 +47,14 @@ impl HttpFactory {
         }
     }
 
-    pub fn route<M: MessageExt>(&mut self, path: String) {
-        self.factory.push((message::<M, AdApp>, path));
+    pub fn route<M: MessageExt>(&mut self) {
+        self.factory.push(message::<M, AdApp>);
     }
 
     pub fn configure(&self, app: AdApp) -> AdApp {
         let mut app = app;
-        for (f, path) in self.clone().factory {
-            app = f(app, &path);
+        for f in self.clone().factory {
+            app = f(app);
         }
         app
     }

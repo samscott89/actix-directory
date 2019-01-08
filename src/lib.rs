@@ -21,10 +21,11 @@
 pub mod app;
 pub mod http;
 mod router;
+mod rpc;
 pub mod service;
 
 pub use self::app::{App, Routeable, RouteType};
-pub use self::router::{PendingRoute, StringifiedMessage};
+pub use self::router::PendingRoute;
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -32,10 +33,10 @@ pub mod test_helpers;
 use ::actix::dev::*;
 use failure::Error;
 use futures::Future;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Deserialize, de::DeserializeOwned, Serialize};
 
 pub mod prelude {
-	pub use crate::{app, http::HttpApp, service::Service, App, Routeable, RouteType, PendingRoute, StringifiedMessage,};
+	pub use crate::{app, http::HttpApp, service::Service, App, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
 }
 
 /// Helper type for messages (`actix::Message`) which can be processed by `soar`.
@@ -45,6 +46,8 @@ pub trait MessageExt:
     Message<Result=<Self as MessageExt>::Response>
     + 'static + Send + DeserializeOwned + Serialize
 {
+	const PATH: Option<&'static str> = None;
+
     type Response: 'static + Send + DeserializeOwned + Serialize;
 }
 
@@ -81,6 +84,25 @@ impl<A, M> MessageResponse<A, M> for FutResponse<M>
         }).map_err(|_| ()));
     }
 }
+
+/// To permit extending the base app, a `OpaqueMessage` type can be used,
+/// which specifies the type of the message with a string, and contains the
+/// serialized inner bytes.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OpaqueMessage {
+    pub id: String,
+    pub inner: Vec<u8>,
+}
+
+impl Message for OpaqueMessage {
+    type Result = OpaqueMessage;
+}
+
+impl MessageExt for OpaqueMessage {
+    type Response = <Self as Message>::Result;
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -143,9 +165,9 @@ mod tests {
 			.route(handler, RouteType::Server)
 			.make_current();
 
-		let fut = app::send_in(crate::StringifiedMessage { id: "test".to_string(), inner: Vec::new()});
+		let fut = app::send_in(crate::OpaqueMessage { id: "test".to_string(), inner: Vec::new()});
 		let res = sys.block_on(fut).unwrap();
-		assert_eq!(res.unwrap().id, "test_response");
+		assert_eq!(res.id, "test_response");
 
 		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut);
@@ -166,11 +188,11 @@ mod tests {
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
 
-		let fut = app::send_in(crate::StringifiedMessage { id: "test".to_string(), inner: Vec::new()});
+		let fut = app::send_in(crate::OpaqueMessage { id: "test".to_string(), inner: Vec::new()});
 		let res = sys.block_on(fut).unwrap();
-		assert_eq!(res.unwrap().id, "test_response");
+		assert_eq!(res.id, "test_response");
 
-		let fut = app::send_in(crate::StringifiedMessage { id: "other".to_string(), inner: Vec::new()});
+		let fut = app::send_in(crate::OpaqueMessage { id: "other".to_string(), inner: Vec::new()});
 		let res = sys.block_on(fut);
 		assert!(res.is_err());
 	}
@@ -218,8 +240,8 @@ mod tests {
 	            .service(addr);
 	       	let app_fact = ad_app.http_server().clone();
 	        ad_app.make_current();
-	        let server = server::new(app_fact).bind("localhost:0").unwrap();
-	        sender.send(format!("http://{}/test", server.addrs()[0])).unwrap();
+	        let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
+	        sender.send(format!("http://{}{}", server.addrs()[0], TestMessage::PATH.unwrap_or(""))).unwrap();
 	        server.start();
 	        sys.run();
 	    });

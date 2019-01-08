@@ -1,7 +1,7 @@
 use ::actix::dev::*;
 use futures::Future;
 use log::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use std::sync::Once;
 
@@ -19,6 +19,8 @@ impl Message for TestMessage {
 }
 
 impl MessageExt for TestMessage {
+	const PATH: Option<&'static str> = Some("/test");
+
 	type Response = TestResponse;
 }
 
@@ -30,6 +32,8 @@ impl Message for TestMessageEmpty {
 }
 
 impl MessageExt for TestMessageEmpty {
+	const PATH: Option<&'static str> = Some("/test_empty");
+
 	type Response = ();
 }
 
@@ -47,7 +51,7 @@ impl crate::service::Service for TestHandler {
 		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
 		   .route::<TestMessage, _>(addr.clone(), RouteType::Server)
 		   .route::<TestMessageEmpty, _>(addr.clone(), RouteType::Server)
-		   .expose::<TestMessage>("/test")
+		   .expose::<TestMessage>()
 		   .route(("test", addr.clone()), RouteType::Server)
 	}
 }
@@ -62,21 +66,21 @@ impl Handler<TestMessage> for TestHandler {
 }
 
 
-impl Handler<crate::StringifiedMessage> for TestHandler {
-	type Result = MessageResult<StringifiedMessage>;
+impl Handler<crate::OpaqueMessage> for TestHandler {
+	type Result = MessageResult<OpaqueMessage>;
 
-	fn handle(&mut self, msg: StringifiedMessage, _ctxt: &mut Context<Self>) -> Self::Result {
+	fn handle(&mut self, msg: OpaqueMessage, _ctxt: &mut Context<Self>) -> Self::Result {
 		trace!("Handling TestMessage from TestHandler");
 		if msg.id == "test" {
-			MessageResult(Ok(StringifiedMessage {
+			MessageResult(OpaqueMessage {
 				id: "test_response".to_string(),
 				inner: b"some reply".to_vec(),
-			}))
+			})
 		} else {
-			MessageResult(Err(StringifiedMessage {
+			MessageResult(OpaqueMessage {
 				id: "err".to_string(),
 				inner: b"unknown route".to_vec(),
-			}))
+			})
 		}
 	}
 }
