@@ -7,74 +7,61 @@
 // pub struct Message {
 //     id: String,
 // }
+use actix::prelude::*;
 
 use std::process::{Child, Command, Stdio};
 
-pub struct Handler {
-    ctxt: zmq::Context,
-}
-
-impl Handler {
-    pub fn new() -> Self {
-        Self {
-            ctxt: zmq::Context::new(),
-        }
-    }
-
-    pub fn start_plugin_process(
-        &self, 
-        plugin_desc: PluginDescription,
-        // id: PluginId,
-        // core: WeakXiCore,
-    ) {
-        let sockout = self.ctxt.socket(zmq::SocketType::REQ).unwrap()
-        let sockin = self.ctxt.socket(zmq::SocketType::REP).unwrap();
-        sockout.connect("localhost:*").unwrap();
-        sockin.connect("localhost:*").unwrap();
-        let out_addr = sockout.get_last_endpoint().unwrap().unwrap();
-        let in_addr = sockin.get_last_endpoint().unwrap().unwrap();
-
-        let spawn_result = thread::spawn(move || {
-            info!("starting plugin {}", &plugin_desc.name);
-            let child = Command::new(&plugin_desc.exec_path)
-                .args(&["--out", out_addr])
-                .args(&["--in", in_addr])
-                .spawn();
-
-            match child {
-                Ok(mut child) => {
-
-                    // // set tracing immediately
-                    // if xi_trace::is_enabled() {
-                    //     plugin.toggle_tracing(true);
-                    // }
-                    app::plugin_connect(plugin);
-                    let err = looper.mainloop(|| BufReader::new(child_stdout), app::rpc_reader());
-                    app::plugin_exit(id, err);
-                }
-                Err(err) => core.plugin_connect(Err(err)),
-            }
-        });
-
-        if let Err(err) = spawn_result {
-            error!("thread spawn failed for {}, {:?}", id, err);
-        }
-    }
-
-}
+use crate::rpc;
+use crate::prelude::*;
 
 type Message = String;
 
 /// Describes attributes and capabilities of a plugin.
-///
-/// Note: - these will eventually be loaded from manifest files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginDescription {
     pub name: String,
     pub version: String,
-    // more metadata ...
     /// path to plugin executable
     pub exec_path: PathBuf,
     #[serde(default)]
     pub messages: Vec<Message>,
+}
+
+pub struct Plugin {
+    rpc: rpc::Rpc,
+}
+
+impl Actor for Plugin {
+    type Context = Context<Self>;
+}
+
+impl Plugin {
+    pub fn start(desc: PluginDescription) -> Self {
+        let rpc = rpc::Rpc::new(&desc.name);
+        let spawn_result = thread::spawn(move || {
+            Command::new(&plugin_desc.exec_path)
+                .args(&["--socket", rpc.socket_name()])
+                .spawn()
+        });
+        if let Err(err) = spawn_result {
+            log::error!("thread spawn failed for {}, {:?}", id, err);
+        }
+
+        Self {
+            rpc
+        }
+    }
+}
+
+impl<M> Handle<M> for Plugin
+    where M: MessageExt,
+{
+    type Result = FutResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        self.rpc.call_method(path.to_string(), &msg)
+            .map_err(|_| RpcError::default())
+            .from_err()
+
+    }
 }

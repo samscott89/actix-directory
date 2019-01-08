@@ -21,7 +21,7 @@
 pub mod app;
 pub mod http;
 mod router;
-mod rpc;
+pub mod rpc;
 pub mod service;
 
 pub use self::app::{App, Routeable, RouteType};
@@ -254,6 +254,42 @@ mod tests {
 	    	.service(TestHandler::default())
 	    	.route::<TestMessage, _>(app::no_client(), RouteType::Client)
 	    	.route::<TestMessage, _>(url, RouteType::Upstream)
+	        .make_current();
+
+	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();
+	    assert_eq!(res.0, 138);
+	}
+
+	#[test]
+	fn test_rpc_service() {
+	    init_logger();
+	    let mut sys = System::new("test_client");
+	    let (sender, receiver) = mpsc::sync_channel(1);
+	    thread::spawn(move || {
+		    let sys = System::new("test_server");
+	        let addr = TestHandler::default();
+	        let app = app::App::new()
+	            .service(addr);
+	       	// let app_fact = ad_app.rpc_S().clone();
+	       	let socket = app.rpc_server("test");
+	        app.make_current();
+	        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
+	        sender.send(socket).unwrap();
+	        // server.start();
+	        sys.run();
+	        log::info!("End RPC server thread");
+	    });
+
+	    thread::sleep(time::Duration::from_millis(100));
+
+	    // let url = Url::parse(&receiver.recv().unwrap()).unwrap();
+
+	    let rpc = crate::rpc::Rpc::new(&receiver.recv().unwrap());
+
+	    let _service = app::App::new()
+	    	// .service(TestHandler::default())
+	    	.route::<TestMessage, _>(app::no_client(), RouteType::Client)
+	    	.route::<TestMessage, _>(rpc, RouteType::Upstream)
 	        .make_current();
 
 	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();

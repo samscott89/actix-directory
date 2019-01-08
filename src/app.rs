@@ -124,15 +124,9 @@ impl App {
                 self.client.insert(service.into());
             },
             RouteType::Server => {
-                if let Some(path)= M::PATH {
-                    self.rpc.server::<M>(path);
-                }
                 self.server.insert(service.into());
             },
             RouteType::Upstream => {
-                if let Some(path)= M::PATH {
-                    self.rpc.upstream::<M>(path);
-                }
                 self.upstream.insert(service.into());
             },
         };
@@ -147,6 +141,7 @@ impl App {
 
         match ty {
             RouteType::Client => {
+                self.rpc.client::<crate::OpaqueMessage>(id);
                 self.client.insert_str(id, service.into());
             },
             RouteType::Server => {
@@ -161,7 +156,6 @@ impl App {
 
     /// Set this application to be the current application default.
     pub fn make_current(self) {
-        self.rpc.build();
         APP.with(|app| app.replace(self));
     }
 
@@ -202,6 +196,10 @@ impl App {
             let app = actix_web::App::with_state(addr.clone());
             factory.clone().configure(app)
         }
+    }
+
+    pub fn rpc_server(&self, name: &str) -> std::path::PathBuf {
+        self.rpc.build(name)
     }
 }
 

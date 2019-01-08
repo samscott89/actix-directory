@@ -28,6 +28,7 @@ jsonrpc-ipc-server = "9.0.0"
 parity-tokio-ipc = "0.1.0"
 tokio-reactor = "0.1.8"
 jsonrpc-client-ipc = { git = "https://github.com/mullvad/jsonrpc-client-rs/" }
+tempfile = "3.0.5"
 
 [features]
 default = []

@@ -14,7 +14,7 @@ impl From<Url> for Remote {
 pub enum Remote
 {
     Http(url::Url),
-    LocalRpc(String),
+    LocalRpc(rpc::Rpc),
     // later: RPC as well,
 }
 
@@ -29,7 +29,7 @@ impl<M> Handler<M> for Remote
     fn handle(&mut self, msg: M, _ctxt: &mut Self::Context) -> Self::Result {
         match self {
             Remote::Http(url) => FutResponse::from(http::send(&msg, url.clone())),
-            Remote::LocalRpc(path) => FutResponse::from(rpc::send(msg, path)),
+            Remote::LocalRpc(rpc) => FutResponse::from(rpc.send(msg)),
         }
     }
 }
