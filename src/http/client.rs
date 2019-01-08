@@ -8,6 +8,8 @@ use log::*;
 use url::Url;
 
 use std::marker::PhantomData;
+use std::os::unix::net::{UnixStream, UnixListener};
+use std::path::{Path, PathBuf};
 
 use crate::{MessageExt, FutResponse};
 
@@ -62,6 +64,38 @@ pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     trace!("Channel making request to Actor running at {:?}", url);
     future::result(msg).and_then(move |msg| {
         ClientRequest::post(url)
+            .body(msg)
+            .unwrap()
+            .send()
+            .map_err(Error::from)
+            .and_then(|resp| {
+                // Deserialize the JSON and map the error
+                resp.body().map_err(Error::from)
+            })
+            .and_then(|body| {
+                future::result(bincode::deserialize(&body))
+                    .map_err(Error::from)
+            })
+    })
+}
+
+
+pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Error=Error>
+    where M: MessageExt,
+{
+    // let path = url.path().to_string();
+    let msg = bincode::serialize(&msg).map_err(Error::from);
+    trace!("Channel making request to Actor running on local socket at {:?}", path);
+    tokio_uds::UnixStream::connect(path).from_err().and_then(|uds| {
+        future::result(msg.map(|msg| (msg, uds)))
+    })
+    // future::result(msg).and_then(move |msg| {
+        // .map(|uds| (msg, uds)).from_err()
+    // })
+    .and_then(|(msg, uds)| {
+        let conn = actix_web::client::Connection::from_stream(uds);
+        ClientRequest::post(M::PATH.unwrap())
+            .with_connection(conn)
             .body(msg)
             .unwrap()
             .send()

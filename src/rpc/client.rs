@@ -40,9 +40,10 @@ impl Rpc {
 
     pub fn send<M: MessageExt>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error> {
         if let Some(msg) = Any::downcast_ref::<OpaqueMessage>(&msg) {
+            log::trace!("Send RPC message for message type {:?} on path {}", crate::get_type!(M), msg.id);
             future::Either::A(self.handle.call_method(msg.id.to_string(), &msg.inner).map_err(|_| RpcError::default()).from_err())
         } else {
-
+            log::trace!("Send RPC message for message type {:?} on path {:?}", crate::get_type!(M), M::PATH);
             future::Either::B(self.handle.call_method(M::PATH.expect("cannot send RPC message when PATH is missing").to_string(), &msg).map_err(|_| RpcError::default()).from_err())
         }
     }

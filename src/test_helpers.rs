@@ -19,7 +19,7 @@ impl Message for TestMessage {
 }
 
 impl MessageExt for TestMessage {
-	const PATH: Option<&'static str> = Some("/test");
+	const PATH: Option<&'static str> = Some("test");
 
 	type Response = TestResponse;
 }
@@ -32,7 +32,7 @@ impl Message for TestMessageEmpty {
 }
 
 impl MessageExt for TestMessageEmpty {
-	const PATH: Option<&'static str> = Some("/test_empty");
+	const PATH: Option<&'static str> = Some("test_empty");
 
 	type Response = ();
 }
@@ -112,7 +112,7 @@ impl Handler<TestMessageEmpty> for TestIntoHandler {
 pub fn init_logger() {
     START.call_once(|| {
     	if std::env::var("TEST_LOG").is_ok() {
-		    ::std::env::set_var("RUST_LOG", format!("debug,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
+		    ::std::env::set_var("RUST_LOG", format!("trace,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
 		    env_logger::init();
     	}
     });

@@ -1,5 +1,6 @@
 use actix::prelude::*;
-use futures::Future;
+use actix::msgs::Execute;
+use futures::{future, Future};
 // use jsonrpc_stdio_server::ServerBuilder;
 // use jsonrpc_stdio_server::jsonrpc_core::*;
 // use tokio::prelude::{Future, Stream};
@@ -10,74 +11,93 @@ use std::sync::Arc;
 
 use crate::{app, MessageExt};
 
-
-
-#[derive(Default)]
 pub struct RpcHandler {
+    addr: Addr<app::ClientIn>,
     methods: HashMap<String, RemoteProcedure<()>>,
 }
 
-impl Actor for RpcHandler {
+pub struct RpcServer {
+    server: Server,
+}
+
+impl Actor for RpcServer {
     type Context = Context<Self>;
+
+    fn stopped(&mut self, _ctxt: &mut Self::Context) {
+        log::trace!("RPC server is stopped");
+    }
 }
 
 impl RpcHandler {
-    pub fn new() -> Self {
+    pub fn new(addr: Addr<app::ClientIn>) -> Self {
         Self {
+            addr,
             methods: HashMap::new(),
         }
     }
 
-    pub fn client<M: MessageExt>(&mut self, path: &str) {
+    pub fn route<M: MessageExt>(&mut self, path: &str) {
+        log::trace!("Add RPC route for {:?} on path {}", crate::get_type!(M), path);
+        let path = path.to_string();
+        let addr = self.addr.clone();
         self.methods.insert(
             path.to_string(),
             RemoteProcedure::Method(
-                Arc::new(|params: jsonrpc_core::Params, _meta: ()| {
+                Arc::new(move |params: jsonrpc_core::Params, _meta: ()| {
+                    log::trace!("Received RPC method for type {:?} on path {}", crate::get_type!(M), path);
                     let msg: M = params.parse().unwrap();
-                    app::send_local(msg).map_err(|_| jsonrpc_core::Error::internal_error())
+                    addr.send(msg)
+                        .map_err(|_| jsonrpc_core::Error::internal_error())
                         .map(|res| serde_json::to_value(&res).unwrap())
                 })
             )
         );
     }
 
-    // pub fn server<M: MessageExt>(&mut self, path: &str) {
-    //     self.methods.insert(
-    //         format!("server/{}", path),
-    //         RemoteProcedure::Method(
-    //             Arc::new(|params: jsonrpc_core::Params, _meta: ()| {
-    //                 let msg: M = params.parse().unwrap();
-    //                 app::send_in(msg).map_err(|_| jsonrpc_core::Error::internal_error())
-    //                     .map(|res| serde_json::to_value(&res).unwrap())
-    //             })
-    //         )
-    //     );
-    // }
-
-    // pub fn upstream<M: MessageExt>(&mut self, path: &str) {
-    //     self.methods.insert(
-    //         format!("upstream/{}", path),
-    //         RemoteProcedure::Method(
-    //             Arc::new(|params: jsonrpc_core::Params, _meta: ()| {
-    //                 let msg: M = params.parse().unwrap();
-    //                 app::send_out(msg).map_err(|_| jsonrpc_core::Error::internal_error())
-    //                     .map(|res| serde_json::to_value(&res).unwrap())
-    //             })
-    //         )
-    //     );
-    // }
-
     /// Will block until EOF is read or until an error occurs.
     /// The server reads from STDIN line-by-line, one request is taken
     /// per line and each response is written to STDOUT on a new line.
-    pub fn build(&self, name: &str) -> std::path::PathBuf  {
+    pub fn build(&self, name: &str) -> (std::path::PathBuf, impl Future<Item=(), Error=()>)  {
         let mut handler = IoHandler::new();
         handler.extend_with(self.methods.clone());
-
+        log::trace!("IoHandler: {:#?}", handler);
         let path = super::sock_path(name);
+        let path2 = path.clone();
         log::info!("Starting RPC server on `{:?}`", path);
-        let server = ServerBuilder::new(handler).start(&path.to_str().unwrap()).expect("Failed to start RPC server");
-        Arbiter::spawn(futures::future::lazy(|| { server.wait(); Ok(()) }));
-        path
+
+        // Spawn the creation of the RPC server on this arbiter
+        // with the setting that the executor for the RPC server is the
+        // current thread.
+        // Arbiter::new(format!("rpc-server-{}", name)).do_send(Execute::new(move || {
+        let fut = future::lazy(move || { 
+            log::trace!("Actually creating the server");
+            let server = ServerBuilder::new(handler)
+                .event_loop_executor(ActixExecutor)
+                // .event_loop_executor(tokio::runtime::current_thread::TaskExecutor::current())
+                .start(&path2.to_str().unwrap())
+                .expect("Failed to start RPC server");
+            log::trace!("RPC server should be running");
+            // server.wait();
+            Ok::<(),_>(())
+        });
+        // }));
+        (path, fut)
+    }
+}
+
+struct ActixExecutor;
+
+impl tokio::executor::Executor for ActixExecutor {
+    fn spawn(
+        &mut self, 
+        future: Box<dyn Future<Item = (), Error = ()> + 'static + Send>
+    ) -> Result<(), tokio::executor::SpawnError> {
+        log::trace!("Spawning future on actix::Arbiter");
+        Arbiter::spawn(future);
+        Ok(())
+    }
+
+    fn status(&self) -> Result<(), tokio::executor::SpawnError> {
+        tokio::runtime::current_thread::TaskExecutor::current().status()
     }
 }

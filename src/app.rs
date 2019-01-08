@@ -6,7 +6,10 @@ use futures::{Future, IntoFuture};
 
 use std::cell::RefCell;
 use std::ops::Deref;
+use std::os::unix::net::{UnixStream, UnixListener};
+use std::path::PathBuf;
 // use std::sync::RwLock;
+use std::sync::Arc;
 
 use crate::{MessageExt, FutResponse, OpaqueMessage};
 use crate::{get_type, router, service};
@@ -16,8 +19,19 @@ use crate::router::Router;
 thread_local!(
     /// Each thread maintains its own `App` struct, which is basically
     /// routing information for messages
-    pub(crate) static APP: RefCell<App> = RefCell::new(App::default())
+    pub(crate) static APP: Arc<RefCell<App>> = Arc::new(RefCell::new(App::default()))
 );
+
+thread_local!(
+    /// Each thread maintains its own `App` struct, which is basically
+    /// routing information for messages
+    pub(crate) static SOCKET_DIR: tempfile::TempDir = tempfile::tempdir().unwrap();
+);
+
+pub(crate) fn sock_path(name: &str) -> PathBuf {
+    // let tmp_dir = tempdir::TempDir::new("actix-dir").unwrap();
+    SOCKET_DIR.with(|dir| dir.path().join(format!("{}.sock", name)))
+}
 
 /// An application can be seen as a set of independent services, connecting
 /// together through the external routes.
@@ -37,7 +51,8 @@ pub struct App {
     server: Router,
     upstream: Router,
     http: HttpFactory,
-    rpc: crate::rpc::RpcHandler,
+    http_internal: HttpFactory,
+    // rpc: crate::rpc::RpcHandler,
 }
 
 impl Actor for App {
@@ -54,12 +69,14 @@ impl App {
     /// Create a new application with empty routing tables
     pub fn new() -> Self {
         let http = HttpFactory::new();
+        let http_internal = HttpFactory::new();
         let client = Router::with_name("client");
         let server = Router::with_name("server");
         let upstream = Router::with_name("upstream");
-        let rpc = crate::rpc::RpcHandler::new();
+        let addr = ClientIn::start_default();
+        // let rpc = crate::rpc::RpcHandler::new(addr);
         Self {
-            client, server, upstream, http, rpc,
+            client, server, upstream, http, http_internal,
         }
     }
 
@@ -118,9 +135,10 @@ impl App {
         log::trace!("Add route: {:?} -> {:?} on {:?}", get_type!(M), get_type!(R), ty);
         match ty {
             RouteType::Client => {
-                if let Some(path)= M::PATH {
-                    self.rpc.client::<M>(path);
-                }
+                // if let Some(path)= M::PATH {
+                //     self.rpc.route::<M>(path);
+                // }
+                self.http_internal.route::<M>();
                 self.client.insert(service.into());
             },
             RouteType::Server => {
@@ -141,7 +159,7 @@ impl App {
 
         match ty {
             RouteType::Client => {
-                self.rpc.client::<crate::OpaqueMessage>(id);
+                // self.rpc.route::<crate::OpaqueMessage>(&format!("/ext/{}", id));
                 self.client.insert_str(id, service.into());
             },
             RouteType::Server => {
@@ -154,8 +172,27 @@ impl App {
         self
     }
 
+    pub fn serve_local_http(&self) -> std::path::PathBuf {
+        let addr = ServerIn::start_default();
+        let factory = self.http_internal.clone();
+        let path = sock_path("main");
+        let listener = tokio_uds::UnixListener::bind(&path).unwrap();
+        // let fd = listener.into_raw_fd();
+        // let tcp_listener = TcpListener::from(fd);
+        actix_web::server::new(move || {
+            let app = actix_web::App::with_state(addr.clone());
+            factory.clone().configure(app)
+        })
+        .workers(2)
+        // .bind(&format!("0.0.0.0:{}", port))
+        .start_incoming(listener.incoming(), false);
+        path
+    }
+
     /// Set this application to be the current application default.
     pub fn make_current(self) {
+        log::trace!("Setting APP on thread: : {:?}", std::thread::current().id());
+        // self.serve_local_http();
         APP.with(|app| app.replace(self));
     }
 
@@ -198,9 +235,9 @@ impl App {
         }
     }
 
-    pub fn rpc_server(&self, name: &str) -> std::path::PathBuf {
-        self.rpc.build(name)
-    }
+    // pub fn rpc_server(&self, name: &str) -> (std::path::PathBuf, impl Future<Item=(), Error=()>) {
+    //     self.rpc.build(name)
+    // }
 }
 
 /// Send a message on the default channel (a local message via the client)
@@ -253,6 +290,25 @@ impl<M> Handler<M> for ServerIn
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
         log::trace!("Handling request for server in on thread: {:?}", std::thread::current().id());
         let res = send_in(msg).map_err(Error::from);
+        FutResponse(Box::new(res))
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ClientIn;
+
+impl Actor for ClientIn {
+    type Context = Context<Self>;
+}
+
+impl<M> Handler<M> for ClientIn
+    where M: MessageExt,
+{
+    type Result = FutResponse<M>;
+
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        log::trace!("Handling request for Clientin on thread: {:?}", std::thread::current().id());
+        let res = send_local(msg).map_err(Error::from);
         FutResponse(Box::new(res))
     }
 }

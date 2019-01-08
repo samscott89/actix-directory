@@ -2,7 +2,7 @@ pub mod client;
 pub mod server;
 
 pub use self::client::Rpc;
-pub use self::server::RpcHandler;
+pub use self::server::{RpcHandler, RpcServer};
 
 use failure::Fail;
 use serde::{Deserialize, Serialize};

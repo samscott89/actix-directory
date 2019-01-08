@@ -21,7 +21,7 @@
 pub mod app;
 pub mod http;
 mod router;
-pub mod rpc;
+// pub mod rpc;
 pub mod service;
 
 pub use self::app::{App, Routeable, RouteType};
@@ -241,14 +241,16 @@ mod tests {
 	       	let app_fact = ad_app.http_server().clone();
 	        ad_app.make_current();
 	        let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-	        sender.send(format!("http://{}{}", server.addrs()[0], TestMessage::PATH.unwrap_or(""))).unwrap();
+	        sender.send(format!("http://{}/{}", server.addrs()[0], TestMessage::PATH.unwrap_or(""))).unwrap();
 	        server.start();
 	        sys.run();
 	    });
 
 	    thread::sleep(time::Duration::from_millis(100));
 
-	    let url = Url::parse(&receiver.recv().unwrap()).unwrap();
+	    let url = receiver.recv().unwrap();
+	    log::trace!("Test URL: {}", url);
+	    let url = Url::parse(&url).unwrap();
 
 	    let _service = app::App::new()
 	    	.service(TestHandler::default())
@@ -266,15 +268,16 @@ mod tests {
 	    let mut sys = System::new("test_client");
 	    let (sender, receiver) = mpsc::sync_channel(1);
 	    thread::spawn(move || {
-		    let sys = System::new("test_server");
+		    let mut sys = System::new("test_server");
 	        let addr = TestHandler::default();
 	        let app = app::App::new()
 	            .service(addr);
 	       	// let app_fact = ad_app.rpc_S().clone();
-	       	let socket = app.rpc_server("test");
+	       	let socket_addr = app.serve_local_http();
 	        app.make_current();
 	        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-	        sender.send(socket).unwrap();
+	        // let _ = sys.block_on(rpc).unwrap();
+	        sender.send(socket_addr).unwrap();
 	        // server.start();
 	        sys.run();
 	        log::info!("End RPC server thread");
@@ -284,16 +287,15 @@ mod tests {
 
 	    // let url = Url::parse(&receiver.recv().unwrap()).unwrap();
 
-	    let rpc = crate::rpc::Rpc::new(&receiver.recv().unwrap());
+	    // let rpc = crate::rpc::Rpc::new(&receiver.recv().unwrap());
+	    let socket_addr = receiver.recv().unwrap();
 
 	    let _service = app::App::new()
-	    	// .service(TestHandler::default())
-	    	.route::<TestMessage, _>(app::no_client(), RouteType::Client)
-	    	.route::<TestMessage, _>(rpc, RouteType::Upstream)
+	    	.route::<TestMessageEmpty, _>(socket_addr, RouteType::Upstream)
 	        .make_current();
 
-	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();
-	    assert_eq!(res.0, 138);
+	    let _res = sys.block_on(app::send_out(TestMessageEmpty)).unwrap();
+	    // assert_eq!(res.0, 138);
 	}
 }
 

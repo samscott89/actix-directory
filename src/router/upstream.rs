@@ -1,11 +1,17 @@
 use actix::prelude::*;
 use url::Url;
 
-use crate::{http, rpc, FutResponse, MessageExt};
+use crate::{http, FutResponse, MessageExt};
 
 impl From<Url> for Remote {
     fn from(other: Url) -> Remote {
         Remote::Http(other)
+    }
+}
+
+impl From<std::path::PathBuf> for Remote {
+    fn from(other: std::path::PathBuf) -> Remote {
+        Remote::LocalHttp(other)
     }
 }
 
@@ -14,7 +20,8 @@ impl From<Url> for Remote {
 pub enum Remote
 {
     Http(url::Url),
-    LocalRpc(rpc::Rpc),
+    LocalHttp(std::path::PathBuf),
+    // LocalRpc(rpc::Rpc),
     // later: RPC as well,
 }
 
@@ -29,7 +36,8 @@ impl<M> Handler<M> for Remote
     fn handle(&mut self, msg: M, _ctxt: &mut Self::Context) -> Self::Result {
         match self {
             Remote::Http(url) => FutResponse::from(http::send(&msg, url.clone())),
-            Remote::LocalRpc(rpc) => FutResponse::from(rpc.send(msg)),
+            Remote::LocalHttp(path) => FutResponse::from(http::send_local(&msg, &path)),
+            // Remote::LocalRpc(rpc) => FutResponse::from(rpc.send(msg)),
         }
     }
 }
