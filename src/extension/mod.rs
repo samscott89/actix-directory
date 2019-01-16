@@ -9,59 +9,82 @@
 // }
 use actix::prelude::*;
 
-use std::process::{Child, Command, Stdio};
 
-use crate::rpc;
+use serde::{Deserialize, Serialize};
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+
 use crate::prelude::*;
 
-type Message = String;
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Message {
+    pub name: String,
+    pub ty: RouteType,
+}
 
 /// Describes attributes and capabilities of a plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginDescription {
+pub struct Plugin {
     pub name: String,
-    pub version: String,
+    // pub version: String,
     /// path to plugin executable
     pub exec_path: PathBuf,
     #[serde(default)]
     pub messages: Vec<Message>,
 }
 
-pub struct Plugin {
-    rpc: rpc::Rpc,
-}
-
-impl Actor for Plugin {
-    type Context = Context<Self>;
-}
-
 impl Plugin {
-    pub fn start(desc: PluginDescription) -> Self {
-        let rpc = rpc::Rpc::new(&desc.name);
-        let spawn_result = thread::spawn(move || {
-            Command::new(&plugin_desc.exec_path)
-                .args(&["--socket", rpc.socket_name()])
-                .spawn()
-        });
-        if let Err(err) = spawn_result {
-            log::error!("thread spawn failed for {}, {:?}", id, err);
-        }
+    pub fn add_to(self, mut app: crate::App) -> crate::App {
+        // let socket2 = socket.clone();
+        log::trace!("Adding plugin: {:?}", self);
+        let Plugin {
+            name,
+            // version,
+            exec_path,
+            messages
+        } = self;
+        let sin = crate::app::sock_path("main");
+        // let sin2 = socket.clone();
+        let sout = crate::app::sock_path(&name);
+        let sout2 = sout.clone();
+        // let name2 = name.clone();
+        let _res = 
+            Command::new(&exec_path)
+                .arg(&sin.to_str().unwrap_or("/dev/null"))
+                .arg(&sout2.to_str().unwrap_or("/dev/null"))
+                .spawn().expect("Failed to start plugin");
 
-        Self {
-            rpc
+
+
+        for msg in messages.iter() {
+            let route = (msg.name.as_str(), sout.clone());
+            app = app.route(route, msg.ty);
         }
+        app
     }
 }
 
-impl<M> Handle<M> for Plugin
-    where M: MessageExt,
-{
-    type Result = FutResponse<M>;
+// #[derive(Clone, Debug)]
+// pub struct Plugin {
+//     socket: PathBuf,
+// }
 
-    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        self.rpc.call_method(path.to_string(), &msg)
-            .map_err(|_| RpcError::default())
-            .from_err()
+// impl Actor for Plugin {
+//     type Context = Context<Self>;
+// }
 
-    }
-}
+
+// impl<M> Handler<M> for Plugin
+//     where M: MessageExt,
+// {
+//     type Result = FutResponse<M>;
+
+//     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+//         self.rpc.call_method(path.to_string(), &msg)
+//             .map_err(|_| RpcError::default())
+//             .from_err()
+
+//     }
+// }

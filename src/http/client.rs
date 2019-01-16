@@ -8,6 +8,7 @@ use log::*;
 use url::Url;
 
 use std::marker::PhantomData;
+#[cfg(unix)]
 use std::os::unix::net::{UnixStream, UnixListener};
 use std::path::{Path, PathBuf};
 
@@ -79,7 +80,7 @@ pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     })
 }
 
-
+#[cfg(unix)]
 pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Error=Error>
     where M: MessageExt,
 {
@@ -94,7 +95,7 @@ pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Erro
     // })
     .and_then(|(msg, uds)| {
         let conn = actix_web::client::Connection::from_stream(uds);
-        ClientRequest::post(M::PATH.unwrap())
+        ClientRequest::post(M::PATH.unwrap_or("/"))
             .with_connection(conn)
             .body(msg)
             .unwrap()

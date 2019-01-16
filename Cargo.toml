@@ -14,14 +14,7 @@ bincode = "1.0.1"
 env_logger = "0.6.0"
 failure = "0.1.5"
 futures = "0.1.25"
-jsonrpc-client-core = { git = "https://github.com/mullvad/jsonrpc-client-rs/" }
-jsonrpc-client-ipc = { git = "https://github.com/mullvad/jsonrpc-client-rs/" }
-# jsonrpc-core = "9.0.0"
-jsonrpc-core = { path = "../jsonrpc-core" }
-# jsonrpc-ipc-server = "9.0.0"
-jsonrpc-ipc-server = { path = "../jsonrpc-ipc-server" }
 log = "0.4.6"
-parity-tokio-ipc = "0.1.0"
 serde = { version = "1.0.84", features = ["serde_derive"] }
 serde_json = "1.0.34"
 tempfile = "3.0.5"
@@ -38,3 +31,7 @@ full_debug = ["debugging_info", "print_types"]
 debugging_info = []
 print_types = ["use_nightly"]
 use_nightly = []
+
+[[bin]]
+name = "test-plugin"
+path = "src/test_plugin.rs"

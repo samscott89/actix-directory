@@ -4,11 +4,11 @@ use failure::Error;
 use futures::{future, Future};
 use log::*;
 
-use crate::MessageExt;
+use crate::{MessageExt, RouteType};
 use crate::app;
 
 type AdApp = App<Addr<app::ServerIn>>;
-type AppFactory = fn(AdApp) -> AdApp;
+type AppFactory = fn(AdApp, Option<RouteType>) -> AdApp;
 
 
 /// Used to create a list of functions to apply to a `actix_web::App`
@@ -16,17 +16,23 @@ type AppFactory = fn(AdApp) -> AdApp;
 #[derive(Clone)]
 pub struct HttpFactory
 {
-    pub factory: Vec<AppFactory>,
+    pub factory: Vec<(AppFactory, Option<RouteType>)>,
 }
 
-fn message<M, H>(mut app: H) -> H
+fn message<M, H>(mut app: H, ty: Option<RouteType>) -> H
     where
         M: MessageExt,
         H: HttpApp
 {
     trace!("Exposing message {:?} on path: {:?}", crate::get_type!(M), M::PATH);
     if let Some(path) = M::PATH {
-        app = app.message::<M>(path);
+        app = match ty {
+            // Some(RouteType::Client) => app.message::<M>(&format!("client/{}", path)),
+            // Some(RouteType::Server) => app.message::<M>(&format!("server/{}", path)),
+            _  => app.message::<M>(path),
+            
+        };
+        // app = app.message::<M>(path);
     } else {
         info!("Message type {:?} does not have a path", crate::get_type!(M));
     }
@@ -47,14 +53,14 @@ impl HttpFactory {
         }
     }
 
-    pub fn route<M: MessageExt>(&mut self) {
-        self.factory.push(message::<M, AdApp>);
+    pub fn route<M: MessageExt>(&mut self, ty: Option<RouteType>) {
+        self.factory.push((message::<M, AdApp>, ty));
     }
 
     pub fn configure(&self, app: AdApp) -> AdApp {
         let mut app = app;
-        for f in self.clone().factory {
-            app = f(app);
+        for (f, ty) in self.clone().factory {
+            app = f(app, ty);
         }
         app
     }

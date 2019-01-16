@@ -3,9 +3,11 @@
 use ::actix::dev::*;
 use failure::Error;
 use futures::{Future, IntoFuture};
+use serde::{Deserialize, Serialize};
 
 use std::cell::RefCell;
 use std::ops::Deref;
+#[cfg(unix)]
 use std::os::unix::net::{UnixStream, UnixListener};
 use std::path::PathBuf;
 // use std::sync::RwLock;
@@ -68,12 +70,14 @@ impl std::default::Default for App {
 impl App {
     /// Create a new application with empty routing tables
     pub fn new() -> Self {
-        let http = HttpFactory::new();
-        let http_internal = HttpFactory::new();
+        let mut http = HttpFactory::new();
+        let mut http_internal = HttpFactory::new();
+        http_internal.route::<OpaqueMessage>(Some(RouteType::Client));
+        http_internal.route::<OpaqueMessage>(Some(RouteType::Server));
         let client = Router::with_name("client");
         let server = Router::with_name("server");
         let upstream = Router::with_name("upstream");
-        let addr = ClientIn::start_default();
+        // let addr = ClientIn::start_default();
         // let rpc = crate::rpc::RpcHandler::new(addr);
         Self {
             client, server, upstream, http, http_internal,
@@ -110,7 +114,7 @@ impl App {
     pub fn expose<M>(mut self) -> Self
         where M: MessageExt
     {
-        self.http.route::<M>();
+        self.http.route::<M>(None);
         self
     }
 
@@ -138,10 +142,11 @@ impl App {
                 // if let Some(path)= M::PATH {
                 //     self.rpc.route::<M>(path);
                 // }
-                self.http_internal.route::<M>();
+                self.http_internal.route::<M>(Some(RouteType::Client));
                 self.client.insert(service.into());
             },
             RouteType::Server => {
+                self.http_internal.route::<M>(Some(RouteType::Server));
                 self.server.insert(service.into());
             },
             RouteType::Upstream => {
@@ -159,7 +164,7 @@ impl App {
 
         match ty {
             RouteType::Client => {
-                // self.rpc.route::<crate::OpaqueMessage>(&format!("/ext/{}", id));
+                // self.http_internal.str_route(id);
                 self.client.insert_str(id, service.into());
             },
             RouteType::Server => {
@@ -172,10 +177,11 @@ impl App {
         self
     }
 
-    pub fn serve_local_http(&self) -> std::path::PathBuf {
+    #[cfg(unix)]
+    pub fn serve_local_http(&self, path: Option<std::path::PathBuf>) -> std::path::PathBuf {
         let addr = ServerIn::start_default();
         let factory = self.http_internal.clone();
-        let path = sock_path("main");
+        let path = path.unwrap_or_else(|| sock_path("main"));
         let listener = tokio_uds::UnixListener::bind(&path).unwrap();
         // let fd = listener.into_raw_fd();
         // let tcp_listener = TcpListener::from(fd);
@@ -381,7 +387,7 @@ pub fn no_server<M: MessageExt>() -> Recipient<M> {
 /// An `Upstream` is remote address for a `Server`. This can be either an HTTP/REST endpoint, or (coming soon)
 /// an RPC endpoint.
 ///
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum RouteType {
     Client,
     Server,

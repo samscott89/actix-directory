@@ -1,26 +1,16 @@
-use ::actix::dev::*;
-use futures::Future;
+use actix::dev::*;
+use actix_web::server;
 use log::*;
+use failure::Error;
+use futures::Future;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::mpsc;
+use std::{time, thread};
 
-static START: Once = Once::new();
-
-use crate::*;
-
-pub fn test_plugin() -> crate::extension::Plugin {
-	crate::extension::Plugin {
-		name: "test_plugin".to_string(),
-		// version: "0.1"
-		exec_path: PathBuf::from("./target/debug/test-plugin"),
-		messages: vec![
-			crate::extension::Message { name: "test".to_string(), ty: RouteType::Upstream },
-			crate::extension::Message { name: "test_empty".to_string(), ty: RouteType::Upstream },
-		],
-	}
-}
+use actix_directory::prelude::*;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TestMessage(pub u8);
@@ -57,8 +47,8 @@ impl Actor for TestHandler {
 	type Context = Context<Self>;
 }
 
-impl crate::service::Service for TestHandler {
-	fn add_to(self, app: crate::app::App) -> crate::app::App {
+impl Service for TestHandler {
+	fn add_to(self, app: app::App) -> app::App {
 		let addr = self.start();
 		app
 		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
@@ -79,7 +69,7 @@ impl Handler<TestMessage> for TestHandler {
 }
 
 
-impl Handler<crate::OpaqueMessage> for TestHandler {
+impl Handler<OpaqueMessage> for TestHandler {
 	type Result = MessageResult<OpaqueMessage>;
 
 	fn handle(&mut self, msg: OpaqueMessage, _ctxt: &mut Context<Self>) -> Self::Result {
@@ -122,11 +112,35 @@ impl Handler<TestMessageEmpty> for TestIntoHandler {
 	}
 }
 
+use std::env;
+
+#[cfg(unix)]
+fn main() {
+	init_logger();
+	log::info!("Starting plugin");
+	let mut args = env::args();
+	let _ = args.next();
+	let sout = args.next().unwrap();
+	let sout = PathBuf::from(sout);
+	let sin = args.next().unwrap();
+	let sin = PathBuf::from(sin);
+	log::info!("Plugin: listening on socket {:?}, server at: {:?}", sin, sout);
+	// let mut socket: Option<String> = None;
+    let sys = System::new("test_server");
+    let addr = TestHandler::default();
+    let ad_app = app::App::new()
+        .service(addr);
+
+   	let _sock = ad_app.serve_local_http(Some(sin)).clone();
+    ad_app.make_current();
+    // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
+    // server.start();
+    sys.run();
+}
+
 pub fn init_logger() {
-    START.call_once(|| {
-    	if std::env::var("TEST_LOG").is_ok() {
-		    ::std::env::set_var("RUST_LOG", format!("trace,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
-		    env_logger::init();
-    	}
-    });
+	if std::env::var("TEST_LOG").is_ok() {
+	    ::std::env::set_var("RUST_LOG", format!("trace,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
+	    env_logger::init();
+	}
 }

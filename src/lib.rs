@@ -19,6 +19,7 @@
 //! Future ideas include adding service discovery/proxies as a supported endpoint.
 
 pub mod app;
+pub mod extension;
 pub mod http;
 mod router;
 // pub mod rpc;
@@ -36,7 +37,7 @@ use futures::Future;
 use serde::{Deserialize, de::DeserializeOwned, Serialize};
 
 pub mod prelude {
-	pub use crate::{app, http::HttpApp, service::Service, App, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
+	pub use crate::{app, http::HttpApp, router::Remote, service::Service, App, FutResponse, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
 }
 
 /// Helper type for messages (`actix::Message`) which can be processed by `soar`.
@@ -46,7 +47,7 @@ pub trait MessageExt:
     Message<Result=<Self as MessageExt>::Response>
     + 'static + Send + DeserializeOwned + Serialize
 {
-	const PATH: Option<&'static str> = None;
+	const PATH: Option<&'static str> = Some("/");
 
     type Response: 'static + Send + DeserializeOwned + Serialize;
 }
@@ -273,7 +274,7 @@ mod tests {
 	        let app = app::App::new()
 	            .service(addr);
 	       	// let app_fact = ad_app.rpc_S().clone();
-	       	let socket_addr = app.serve_local_http();
+	       	let socket_addr = app.serve_local_http(None);
 	        app.make_current();
 	        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
 	        // let _ = sys.block_on(rpc).unwrap();
@@ -295,6 +296,26 @@ mod tests {
 	        .make_current();
 
 	    let _res = sys.block_on(app::send_out(TestMessageEmpty)).unwrap();
+	    // assert_eq!(res.0, 138);
+	}
+
+	#[test]
+	fn test_plugin() {
+	    init_logger();
+	    let mut sys = System::new("test_server");
+        let addr = TestHandler::default();
+        let plugin = crate::test_helpers::test_plugin();
+        let mut app = app::App::new()
+        	.route(("test", std::path::PathBuf::from("/tmp/sin.sock")), RouteType::Upstream);
+       	let socket_addr = app.serve_local_http(None);
+        // app = plugin.add_to(app);
+        app.make_current();
+
+        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
+        // let _ = sys.block_on(rpc).unwrap();
+        // sender.send(socket_addr).unwrap();
+        let msg = crate::OpaqueMessage { id: "test".to_string(), inner: Vec::new()};
+	    let _res = sys.block_on(app::send_out(msg)).unwrap();
 	    // assert_eq!(res.0, 138);
 	}
 }
