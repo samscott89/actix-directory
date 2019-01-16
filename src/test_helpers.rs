@@ -8,16 +8,16 @@ use std::sync::Once;
 
 static START: Once = Once::new();
 
-use crate::*;
+use crate::prelude::*;
 
-pub fn test_plugin() -> crate::extension::Plugin {
-	crate::extension::Plugin {
+pub fn test_plugin() -> Plugin {
+	Plugin {
 		name: "test_plugin".to_string(),
 		// version: "0.1"
 		exec_path: PathBuf::from("./target/debug/test-plugin"),
 		messages: vec![
-			crate::extension::Message { name: "test".to_string(), ty: RouteType::Upstream },
-			crate::extension::Message { name: "test_empty".to_string(), ty: RouteType::Upstream },
+			crate::plugin::Message { name: "test".to_string(), ty: RouteType::Server },
+			crate::plugin::Message { name: "test_empty".to_string(), ty: RouteType::Server },
 		],
 	}
 }
@@ -32,7 +32,7 @@ impl Message for TestMessage {
 }
 
 impl MessageExt for TestMessage {
-	const PATH: Option<&'static str> = Some("test");
+	const PATH: &'static str = "test";
 
 	type Response = TestResponse;
 }
@@ -45,7 +45,7 @@ impl Message for TestMessageEmpty {
 }
 
 impl MessageExt for TestMessageEmpty {
-	const PATH: Option<&'static str> = Some("test_empty");
+	const PATH: &'static str = "test_empty";
 
 	type Response = ();
 }
@@ -57,8 +57,8 @@ impl Actor for TestHandler {
 	type Context = Context<Self>;
 }
 
-impl crate::service::Service for TestHandler {
-	fn add_to(self, app: crate::app::App) -> crate::app::App {
+impl Service for TestHandler {
+	fn add_to(self, app: App) -> App {
 		let addr = self.start();
 		app
 		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
@@ -79,7 +79,7 @@ impl Handler<TestMessage> for TestHandler {
 }
 
 
-impl Handler<crate::OpaqueMessage> for TestHandler {
+impl Handler<OpaqueMessage> for TestHandler {
 	type Result = MessageResult<OpaqueMessage>;
 
 	fn handle(&mut self, msg: OpaqueMessage, _ctxt: &mut Context<Self>) -> Self::Result {
@@ -125,7 +125,7 @@ impl Handler<TestMessageEmpty> for TestIntoHandler {
 pub fn init_logger() {
     START.call_once(|| {
     	if std::env::var("TEST_LOG").is_ok() {
-		    ::std::env::set_var("RUST_LOG", format!("trace,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
+		    ::std::env::set_var("RUST_LOG", format!("debug,actix_web={1},actix={1},actix_directory={0}", "trace", "trace"));
 		    env_logger::init();
     	}
     });

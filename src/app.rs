@@ -13,7 +13,8 @@ use std::path::PathBuf;
 // use std::sync::RwLock;
 use std::sync::Arc;
 
-use crate::{MessageExt, FutResponse, OpaqueMessage};
+use crate::prelude::*;
+// use crate::{MessageExt, FutResponse, OpaqueMessage};
 use crate::{get_type, router, service};
 use crate::http::HttpFactory;
 use crate::router::Router;
@@ -70,7 +71,7 @@ impl std::default::Default for App {
 impl App {
     /// Create a new application with empty routing tables
     pub fn new() -> Self {
-        let mut http = HttpFactory::new();
+        let http = HttpFactory::new();
         let mut http_internal = HttpFactory::new();
         http_internal.route::<OpaqueMessage>(Some(RouteType::Client));
         http_internal.route::<OpaqueMessage>(Some(RouteType::Server));
@@ -108,6 +109,11 @@ impl App {
     /// Add a service to the application, usually encapsulates mutliple routes
     pub fn service<S: service::Service>(self, service: S) -> Self {
         service.add_to(self)
+    }
+
+    #[cfg(unix)]
+    pub fn plugin(self, plugin: crate::Plugin) -> Self {
+        plugin.add_to(self)
     }
 
     /// Expose the message `M` on HTTP endpoint `path`.
@@ -177,24 +183,6 @@ impl App {
         self
     }
 
-    #[cfg(unix)]
-    pub fn serve_local_http(&self, path: Option<std::path::PathBuf>) -> std::path::PathBuf {
-        let addr = ServerIn::start_default();
-        let factory = self.http_internal.clone();
-        let path = path.unwrap_or_else(|| sock_path("main"));
-        let listener = tokio_uds::UnixListener::bind(&path).unwrap();
-        // let fd = listener.into_raw_fd();
-        // let tcp_listener = TcpListener::from(fd);
-        actix_web::server::new(move || {
-            let app = actix_web::App::with_state(addr.clone());
-            factory.clone().configure(app)
-        })
-        .workers(2)
-        // .bind(&format!("0.0.0.0:{}", port))
-        .start_incoming(listener.incoming(), false);
-        path
-    }
-
     /// Set this application to be the current application default.
     pub fn make_current(self) {
         log::trace!("Setting APP on thread: : {:?}", std::thread::current().id());
@@ -238,12 +226,29 @@ impl App {
         move || {
             let app = actix_web::App::with_state(addr.clone());
             factory.clone().configure(app)
+                .middleware(actix_web::middleware::Logger::default())
+
         }
     }
 
-    // pub fn rpc_server(&self, name: &str) -> (std::path::PathBuf, impl Future<Item=(), Error=()>) {
-    //     self.rpc.build(name)
-    // }
+    #[cfg(unix)]
+    pub fn serve_local_http(&self, path: Option<std::path::PathBuf>) -> std::path::PathBuf {
+        let addr = ServerIn::start_default();
+        let factory = self.http_internal.clone();
+        let path = path.unwrap_or_else(|| sock_path("main"));
+        let listener = tokio_uds::UnixListener::bind(&path).unwrap();
+        // let fd = listener.into_raw_fd();
+        // let tcp_listener = TcpListener::from(fd);
+        actix_web::server::new(move || {
+            let app = actix_web::App::with_state(addr.clone());
+            factory.clone().configure(app)
+                .middleware(actix_web::middleware::Logger::default())
+        })
+        .workers(2)
+        // .bind(&format!("0.0.0.0:{}", port))
+        .start_incoming(listener.incoming(), false);
+        path
+    }
 }
 
 /// Send a message on the default channel (a local message via the client)

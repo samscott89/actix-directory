@@ -1,14 +1,7 @@
 use actix::dev::*;
-use actix_web::server;
 use log::*;
-use failure::Error;
 use futures::Future;
 use serde::{Deserialize, Serialize};
-use url::Url;
-
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::{time, thread};
 
 use actix_directory::prelude::*;
 
@@ -22,7 +15,7 @@ impl Message for TestMessage {
 }
 
 impl MessageExt for TestMessage {
-	const PATH: Option<&'static str> = Some("test");
+	const PATH: &'static str = "test";
 
 	type Response = TestResponse;
 }
@@ -35,7 +28,7 @@ impl Message for TestMessageEmpty {
 }
 
 impl MessageExt for TestMessageEmpty {
-	const PATH: Option<&'static str> = Some("test_empty");
+	const PATH: &'static str = "test_empty";
 
 	type Response = ();
 }
@@ -112,35 +105,11 @@ impl Handler<TestMessageEmpty> for TestIntoHandler {
 	}
 }
 
-use std::env;
-
 #[cfg(unix)]
 fn main() {
-	init_logger();
-	log::info!("Starting plugin");
-	let mut args = env::args();
-	let _ = args.next();
-	let sout = args.next().unwrap();
-	let sout = PathBuf::from(sout);
-	let sin = args.next().unwrap();
-	let sin = PathBuf::from(sin);
-	log::info!("Plugin: listening on socket {:?}, server at: {:?}", sin, sout);
-	// let mut socket: Option<String> = None;
-    let sys = System::new("test_server");
     let addr = TestHandler::default();
     let ad_app = app::App::new()
         .service(addr);
 
-   	let _sock = ad_app.serve_local_http(Some(sin)).clone();
-    ad_app.make_current();
-    // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-    // server.start();
-    sys.run();
-}
-
-pub fn init_logger() {
-	if std::env::var("TEST_LOG").is_ok() {
-	    ::std::env::set_var("RUST_LOG", format!("trace,jsonrpc=trace,actix_web={1},actix={0},actix_directory={1}", "trace", "trace"));
-	    env_logger::init();
-	}
+    actix_directory::plugin::run(ad_app);
 }

@@ -25,17 +25,10 @@ fn message<M, H>(mut app: H, ty: Option<RouteType>) -> H
         H: HttpApp
 {
     trace!("Exposing message {:?} on path: {:?}", crate::get_type!(M), M::PATH);
-    if let Some(path) = M::PATH {
-        app = match ty {
-            // Some(RouteType::Client) => app.message::<M>(&format!("client/{}", path)),
-            // Some(RouteType::Server) => app.message::<M>(&format!("server/{}", path)),
-            _  => app.message::<M>(path),
-            
-        };
-        // app = app.message::<M>(path);
-    } else {
-        info!("Message type {:?} does not have a path", crate::get_type!(M));
-    }
+    app = match ty {
+        _  => app.message::<M>(M::PATH),
+        
+    };
     app
     
 }
@@ -143,9 +136,11 @@ fn handle_request<M: 'static>(
 	where
 	    M: MessageExt
 {
+    trace!("Recieved request: {:?}", &req);
     let addr = req.state().clone();
     req.body().map_err(Error::from)
     	.and_then(|body| {
+            trace!("Recevied message: {:?}. Deserialize as {:?}", body, crate::get_type!(M));
     		bincode::deserialize(&body).map_err(|err| {
                 error!("Failed to deserialize request: {}", err);
                 Error::from(err)

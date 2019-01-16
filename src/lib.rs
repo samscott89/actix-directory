@@ -19,13 +19,16 @@
 //! Future ideas include adding service discovery/proxies as a supported endpoint.
 
 pub mod app;
-pub mod extension;
+#[cfg(unix)]
+pub mod plugin;
 pub mod http;
 mod router;
 // pub mod rpc;
 pub mod service;
 
 pub use self::app::{App, Routeable, RouteType};
+#[cfg(unix)]
+pub use self::plugin::Plugin;
 pub use self::router::PendingRoute;
 
 #[cfg(test)]
@@ -38,6 +41,8 @@ use serde::{Deserialize, de::DeserializeOwned, Serialize};
 
 pub mod prelude {
 	pub use crate::{app, http::HttpApp, router::Remote, service::Service, App, FutResponse, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
+	#[cfg(unix)]
+	pub use crate::Plugin;
 }
 
 /// Helper type for messages (`actix::Message`) which can be processed by `soar`.
@@ -46,8 +51,9 @@ pub mod prelude {
 pub trait MessageExt:
     Message<Result=<Self as MessageExt>::Response>
     + 'static + Send + DeserializeOwned + Serialize
+    + std::fmt::Debug
 {
-	const PATH: Option<&'static str> = Some("/");
+	const PATH: &'static str;
 
     type Response: 'static + Send + DeserializeOwned + Serialize;
 }
@@ -101,6 +107,8 @@ impl Message for OpaqueMessage {
 
 impl MessageExt for OpaqueMessage {
     type Response = <Self as Message>::Result;
+
+    const PATH: &'static str = "";
 }
 
 
@@ -242,7 +250,7 @@ mod tests {
 	       	let app_fact = ad_app.http_server().clone();
 	        ad_app.make_current();
 	        let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-	        sender.send(format!("http://{}/{}", server.addrs()[0], TestMessage::PATH.unwrap_or(""))).unwrap();
+	        sender.send(format!("http://{}/{}", server.addrs()[0], TestMessage::PATH)).unwrap();
 	        server.start();
 	        sys.run();
 	    });
@@ -259,7 +267,9 @@ mod tests {
 	    	.route::<TestMessage, _>(url, RouteType::Upstream)
 	        .make_current();
 
-	    let res = sys.block_on(app::send(TestMessage(138))).unwrap();
+	    let res = sys.block_on(app::send(TestMessage(138)));
+	    log::trace!("RPC result: {:?}", res);
+	    let res = res.unwrap();
 	    assert_eq!(res.0, 138);
 	}
 
@@ -273,32 +283,27 @@ mod tests {
 	        let addr = TestHandler::default();
 	        let app = app::App::new()
 	            .service(addr);
-	       	// let app_fact = ad_app.rpc_S().clone();
 	       	let socket_addr = app.serve_local_http(None);
 	        app.make_current();
-	        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-	        // let _ = sys.block_on(rpc).unwrap();
 	        sender.send(socket_addr).unwrap();
-	        // server.start();
 	        sys.run();
 	        log::info!("End RPC server thread");
 	    });
 
 	    thread::sleep(time::Duration::from_millis(100));
-
-	    // let url = Url::parse(&receiver.recv().unwrap()).unwrap();
-
-	    // let rpc = crate::rpc::Rpc::new(&receiver.recv().unwrap());
 	    let socket_addr = receiver.recv().unwrap();
 
 	    let _service = app::App::new()
-	    	.route::<TestMessageEmpty, _>(socket_addr, RouteType::Upstream)
+	    	.route::<TestMessage, _>(socket_addr, RouteType::Upstream)
 	        .make_current();
 
-	    let _res = sys.block_on(app::send_out(TestMessageEmpty)).unwrap();
-	    // assert_eq!(res.0, 138);
+	    let res = sys.block_on(app::send_out(TestMessage(69)));
+	    log::trace!("RPC result: {:?}", res);
+	    let res = res.unwrap();
+	    assert_eq!(res.0, 69);
 	}
 
+	#[cfg(unix)]
 	#[test]
 	fn test_plugin() {
 	    init_logger();
@@ -306,17 +311,15 @@ mod tests {
         let addr = TestHandler::default();
         let plugin = crate::test_helpers::test_plugin();
         let mut app = app::App::new()
-        	.route(("test", std::path::PathBuf::from("/tmp/sin.sock")), RouteType::Upstream);
+        				.plugin(plugin);
        	let socket_addr = app.serve_local_http(None);
-        // app = plugin.add_to(app);
         app.make_current();
 
-        // let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-        // let _ = sys.block_on(rpc).unwrap();
-        // sender.send(socket_addr).unwrap();
+        // Give the plugin time to spin up?
+        thread::sleep(time::Duration::from_millis(100));
+
         let msg = crate::OpaqueMessage { id: "test".to_string(), inner: Vec::new()};
 	    let _res = sys.block_on(app::send_out(msg)).unwrap();
-	    // assert_eq!(res.0, 138);
 	}
 }
 

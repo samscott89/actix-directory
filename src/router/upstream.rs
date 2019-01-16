@@ -21,24 +21,11 @@ impl From<std::path::PathBuf> for Remote {
 #[derive(Clone, Debug)]
 pub enum Remote
 {
+    /// Remote actix-directory server located at a remote HTTP Url
     Http(url::Url),
+    /// Server located on a local path/socket.
     LocalHttp(std::path::PathBuf),
-    // LocalRpc(rpc::Rpc),
-    // later: RPC as well,
 }
-
-// impl Remote {
-//     pub fn for_route_type(mut self, ty: crate::RouteType) -> Self {
-//         if let Remote::LocalHttp(ref mut path) = &mut self {
-//             match ty {
-//                 crate::RouteType::Client => path.push("client"),
-//                 crate::RouteType::Server => path.push("server"),
-//                 _ => {}
-//             }
-//         }
-//         self
-//     }
-// }
 
 impl Actor for Remote {
     type Context = Context<Self>;

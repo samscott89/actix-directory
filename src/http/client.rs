@@ -38,7 +38,7 @@ impl<M: MessageExt> Handler<M> for HttpHandler<M> {
         let msg = bincode::serialize(&msg).map_err(Error::from);
         trace!("Channel making request to Actor running at {} on path {}", url.host_str().unwrap_or(""), path);
         let fut = future::result(msg).and_then(move |msg| {
-            ClientRequest::post(url)
+            ClientRequest::post(format!("/{}", M::PATH))
                 .body(msg)
                 .unwrap()
                 .send()
@@ -85,24 +85,22 @@ pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Erro
     where M: MessageExt,
 {
     // let path = url.path().to_string();
+    trace!("Sending message: {:?} to {:?}", msg, path);
     let msg = bincode::serialize(&msg).map_err(Error::from);
+    trace!("Serialized: {:?}", msg);
     trace!("Channel making request to Actor running on local socket at {:?}", path);
     tokio_uds::UnixStream::connect(path).from_err().and_then(|uds| {
         future::result(msg.map(|msg| (msg, uds)))
     })
-    // future::result(msg).and_then(move |msg| {
-        // .map(|uds| (msg, uds)).from_err()
-    // })
     .and_then(|(msg, uds)| {
         let conn = actix_web::client::Connection::from_stream(uds);
-        ClientRequest::post(M::PATH.unwrap_or("/"))
+        ClientRequest::post(format!("/{}", M::PATH))
             .with_connection(conn)
             .body(msg)
             .unwrap()
             .send()
             .map_err(Error::from)
             .and_then(|resp| {
-                // Deserialize the JSON and map the error
                 resp.body().map_err(Error::from)
             })
             .and_then(|body| {
