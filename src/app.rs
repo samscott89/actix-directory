@@ -337,7 +337,7 @@ impl<M> Handler<M> for Passthrough
     type Result = FutResponse<M>;
 
     fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        let res = send_out(msg).map_err(Error::from);
+        let res = send_in(msg).map_err(Error::from);
         FutResponse(Box::new(res))
     }
 }
@@ -361,12 +361,9 @@ impl<M> Handler<M> for EmptyServer
 {
     type Result = FutResponse<M>;
 
-    fn handle(&mut self, _msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        FutResponse::from(
-            Err(
-                router::RouterError::default().into()
-            ).into_future()
-        )
+    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        let res = send_out(msg).map_err(Error::from);
+        FutResponse(Box::new(res))
     }
 }
 
