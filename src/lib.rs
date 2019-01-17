@@ -98,6 +98,7 @@ impl<A, M> MessageResponse<A, M> for FutResponse<M>
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OpaqueMessage {
     pub id: String,
+    #[serde(with = "serde_bytes")]
     pub inner: Vec<u8>,
 }
 
@@ -134,6 +135,8 @@ mod tests {
 
 		let handler = TestHandler::start_default();
 		app::App::new()
+			// explicitly opt out of forwarding `TestMessage` to the server
+			.route::<TestMessage, _>(app::no_client(), RouteType::Client)
 			.route::<TestMessage, _>(handler, RouteType::Server)
 			.make_current();
 
@@ -231,10 +234,6 @@ mod tests {
 		let fut = app::send_in(TestMessage(42));
 		let res = sys.block_on(fut).unwrap();
 		assert_eq!(res.0, 42);
-
-		let fut = app::send_local(TestMessage(42));
-		let res = sys.block_on(fut);
-		assert!(res.is_err());
 	}
 
 	#[test]
@@ -243,6 +242,7 @@ mod tests {
 	    let mut sys = System::new("test_client");
 	    let (sender, receiver) = mpsc::sync_channel(1);
 	    thread::spawn(move || {
+	    	init_logger();
 		    let sys = System::new("test_server");
 	        let addr = TestHandler::default();
 	        let ad_app = app::App::new()
@@ -262,8 +262,6 @@ mod tests {
 	    let url = Url::parse(&url).unwrap();
 
 	    let _service = app::App::new()
-	    	.service(TestHandler::default())
-	    	.route::<TestMessage, _>(app::no_client(), RouteType::Client)
 	    	.route::<TestMessage, _>(url, RouteType::Upstream)
 	        .make_current();
 
@@ -297,7 +295,7 @@ mod tests {
 	    	.route::<TestMessage, _>(socket_addr, RouteType::Upstream)
 	        .make_current();
 
-	    let res = sys.block_on(app::send_out(TestMessage(69)));
+	    let res = sys.block_on(app::send(TestMessage(69)));
 	    log::trace!("RPC result: {:?}", res);
 	    let res = res.unwrap();
 	    assert_eq!(res.0, 69);
@@ -318,8 +316,8 @@ mod tests {
         // Give the plugin time to spin up?
         thread::sleep(time::Duration::from_millis(100));
 
-        let msg = crate::OpaqueMessage { id: "test".to_string(), inner: Vec::new()};
-	    let _res = sys.block_on(app::send_out(msg)).unwrap();
+        let msg = crate::OpaqueMessage { id: "test".to_string(), inner: bincode::serialize(&TestMessage(123)).unwrap()};
+	    let _res = sys.block_on(app::send(msg)).unwrap();
 	}
 }
 

@@ -2,7 +2,8 @@
 
 use ::actix::dev::*;
 use failure::Error;
-use futures::{Future, IntoFuture};
+use futures::{future, Future, IntoFuture};
+use log::*;
 use serde::{Deserialize, Serialize};
 
 use std::cell::RefCell;
@@ -53,8 +54,8 @@ pub struct App {
     client: Router,
     server: Router,
     upstream: Router,
-    http: HttpFactory,
-    http_internal: HttpFactory,
+    http: HttpFactory<ServerIn>,
+    http_internal: HttpFactory<ClientIn>,
     // rpc: crate::rpc::RpcHandler,
 }
 
@@ -74,7 +75,6 @@ impl App {
         let http = HttpFactory::new();
         let mut http_internal = HttpFactory::new();
         http_internal.route::<OpaqueMessage>(Some(RouteType::Client));
-        http_internal.route::<OpaqueMessage>(Some(RouteType::Server));
         let client = Router::with_name("client");
         let server = Router::with_name("server");
         let upstream = Router::with_name("upstream");
@@ -128,7 +128,7 @@ impl App {
     //     self.http.configure(app)
     // }
 
-    pub fn get_factory(&self) -> HttpFactory {
+    pub fn get_factory(&self) -> HttpFactory<ServerIn> {
         self.http.clone()
     }
 
@@ -201,14 +201,26 @@ impl App {
     pub fn send_local<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
         where M: MessageExt
     {
-        self.client.send(msg)
+        if let Some(r) = self.client.recipient_for(&msg) {
+            trace!("Found recipient on client");
+            future::Either::A(r.send(msg).map_err(Error::from))
+        } else {
+            trace!("No client, forwarding to server");
+            future::Either::B(self.send_in(msg))
+        }
     }
 
     /// Send a message to the handler for incoming messages
     pub fn send_in<M>(&self, msg: M) -> impl Future<Item=M::Response, Error=Error>
         where M: MessageExt
     {
-        self.server.send(msg)
+        if let Some(r) = self.server.recipient_for(&msg) {
+            trace!("Found recipient on server");
+            future::Either::A(r.send(msg).map_err(Error::from))
+        } else {
+            trace!("No server, forwarding to upstream");
+            future::Either::B(self.send_out(msg))
+        }
     }
 
 
@@ -233,7 +245,7 @@ impl App {
 
     #[cfg(unix)]
     pub fn serve_local_http(&self, path: Option<std::path::PathBuf>) -> std::path::PathBuf {
-        let addr = ServerIn::start_default();
+        let addr = ClientIn::start_default();
         let factory = self.http_internal.clone();
         let path = path.unwrap_or_else(|| sock_path("main"));
         let listener = tokio_uds::UnixListener::bind(&path).unwrap();
@@ -325,53 +337,40 @@ impl<M> Handler<M> for ClientIn
 }
 
 #[derive(Default)]
-struct Passthrough;
+struct RejectAll;
 
-impl Actor for Passthrough {
+impl Actor for RejectAll {
     type Context = Context<Self>;
 }
 
-impl<M> Handler<M> for Passthrough
+impl<M> Handler<M> for RejectAll
     where M: MessageExt,
 {
     type Result = FutResponse<M>;
 
-    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        let res = send_in(msg).map_err(Error::from);
-        FutResponse(Box::new(res))
+    fn handle(&mut self, _msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
+        trace!("Rejecting message from propogating through");
+        FutResponse::from(
+            Err(
+                router::RouterError::default().into()
+            ).into_future()
+        )
     }
 }
 
 
-/// This is a simple client implementation which will just forward all
-/// messages to the upstream handler.
+/// Create a simple non-existent client implementation which rejects all messages.
+/// This is to explicitly avoid forwarded messages along on a missing route.
 pub fn no_client<M: MessageExt>() -> Recipient<M> {
-    Passthrough::start_default().recipient()
+    trace!("Create new rejecting client");
+    RejectAll::start_default().recipient()
 }
 
-#[derive(Default)]
-struct EmptyServer;
-
-impl Actor for EmptyServer {
-    type Context = Context<Self>;
-}
-
-impl<M> Handler<M> for EmptyServer
-    where M: MessageExt,
-{
-    type Result = FutResponse<M>;
-
-    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        let res = send_out(msg).map_err(Error::from);
-        FutResponse(Box::new(res))
-    }
-}
 
 /// Create a simple non-existent server implementation which rejects all messages.
-/// While this is not strictly necessary, since a missing route has a similar effect,
-/// it is easier for debugging purposes to explicitly have a request rejector.
+/// This is to explicitly avoid forwarded messages along on a missing route.
 pub fn no_server<M: MessageExt>() -> Recipient<M> {
-    EmptyServer::start_default().recipient()
+    RejectAll::start_default().recipient()
 }
 
 /// When creating a new route, the type is used to specify what kind of route it is.

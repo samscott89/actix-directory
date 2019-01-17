@@ -73,18 +73,38 @@ impl Router {
     }
 
     /// Get the handler identified by the generic type parameter `M`.
-    pub fn get_str(&self, id: &str) -> Option<Recipient<OpaqueMessage>>
+    fn get_str(&self, id: &str) -> Option<Recipient<OpaqueMessage>>
     {
         trace!("Lookup request handler for {:?}", id);
         self.str_routes.get(id).cloned()
     }
 
     /// Get the handler identified by the generic type parameter `M`.
-    pub fn get<M>(&self) -> Option<Recipient<M>>
-        where  M: MessageExt,
+    fn get<M>(&self) -> Option<Recipient<M>>
+        where M: MessageExt,
     {
         trace!("Lookup request handler for {:?}", get_type!(M));
         self.routes.get().cloned()
+    }
+
+    pub fn recipient_for<M>(&self, msg: &M) -> Option<Recipient<M>>
+        where M: MessageExt
+    {
+        match Any::downcast_ref::<OpaqueMessage>(msg) {
+            Some(ref m) => {
+                trace!("Get string-typed recipient with id: {}", m.id);
+                self.get_str(&m.id)
+                     .map(|r| {
+                            // At this point we are just throwing away information
+                            // Since we go M -> OpaqueMessage, but Recipient<OpaqueMessage> -> Recipient<M>
+                        Any::downcast_ref::<Recipient<M>>(&r).unwrap().clone()
+                     })
+            },
+            _ => {
+                trace!("Get regular recipient with type {:?}", get_type!(M));
+                self.get::<M>()
+            }
+        }
     }
 
     /// Send a message on this router
@@ -95,39 +115,17 @@ impl Router {
         // route.
         //
         // Otherwise, use the regular routes for findin the handler.
-        match Any::downcast_ref::<OpaqueMessage>(&msg) {
-            Some(m) => {
-                trace!("Sending string-typed message with id: {}", m.id);
-                let recip = self.get_str(&m.id)
-                     .ok_or_else(|| {
-                        error!("No route found on router: {}", self.name);
-                        #[cfg(feature="debugging_info")]
-                        debug!("Routes: {:#?}", self._info);
-                        Error::from(RouterError::default())
-                      })
-                     .into_future();
-                future::Either::A(
-                    recip
-                        .and_then(|r| {
-                            // At this point we are just throwing away information
-                            // Since we go M -> OpaqueMessage, but Recipient<OpaqueMessage> -> Recipient<M>
-                            let r = Any::downcast_ref::<Recipient<M>>(&r).unwrap();
-                            r.clone().send(msg).map_err(Error::from)
-                        }))
-            },
-            _ => {
-                trace!("Sending regular message with type {:?}", get_type!(M));
-                let recip = self.get::<M>()
-                     .ok_or_else(|| {
-                        error!("No route found on router: {}", self.name);
-                        #[cfg(feature="debugging_info")]
-                        debug!("Routes: {:#?}", self._info);
-                        Error::from(RouterError::default())
-                      })
-                     .into_future();
-                future::Either::B(recip.and_then(|r| r.send(msg).map_err(Error::from)))
-            }
-        }
+        self.recipient_for(&msg)
+            .ok_or_else(|| {
+               error!("No route found on router: {}", self.name);
+               #[cfg(feature="debugging_info")]
+               debug!("Routes: {:#?}", self._info);
+               Error::from(RouterError::default())
+             })
+            .into_future()
+            .and_then(move |r| {
+                r.send(msg).map_err(Error::from)
+            })
     }
 }
 

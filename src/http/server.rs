@@ -7,16 +7,27 @@ use log::*;
 use crate::{MessageExt, RouteType};
 use crate::app;
 
-type AdApp = App<Addr<app::ServerIn>>;
-type AppFactory = fn(AdApp, Option<RouteType>) -> AdApp;
+type AdApp<A> = App<Addr<A>>;
+type AppFactory<A> = fn(AdApp<A>, Option<RouteType>) -> AdApp<A>;
 
 
 /// Used to create a list of functions to apply to a `actix_web::App`
 /// in order to properly configure all routes.
-#[derive(Clone)]
-pub struct HttpFactory
+#[derive(Default)]
+pub struct HttpFactory<A>
+    where A: actix::Actor
 {
-    pub factory: Vec<(AppFactory, Option<RouteType>)>,
+    pub factory: Vec<(AppFactory<A>, Option<RouteType>)>,
+}
+
+impl<A> Clone for HttpFactory<A>
+    where A: actix::Actor
+{
+    fn clone(&self) -> Self {
+        HttpFactory {
+            factory: self.factory.clone()
+        }
+    }
 }
 
 fn message<M, H>(mut app: H, ty: Option<RouteType>) -> H
@@ -24,22 +35,20 @@ fn message<M, H>(mut app: H, ty: Option<RouteType>) -> H
         M: MessageExt,
         H: HttpApp
 {
-    trace!("Exposing message {:?} on path: {:?}", crate::get_type!(M), M::PATH);
+    let path = format!("/{}", M::PATH);
+    trace!("Exposing message {:?} on path: {:?}", crate::get_type!(M), path);
     app = match ty {
-        _  => app.message::<M>(M::PATH),
+        _  => app.message::<M>(&path),
         
     };
     app
     
 }
 
-impl Default for HttpFactory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HttpFactory {
+impl<A> HttpFactory<A>
+    where A: actix::Actor,
+          AdApp<A>: HttpApp
+{
     pub fn new() -> Self {
         HttpFactory {
             factory: Vec::new(),
@@ -47,12 +56,14 @@ impl HttpFactory {
     }
 
     pub fn route<M: MessageExt>(&mut self, ty: Option<RouteType>) {
-        self.factory.push((message::<M, AdApp>, ty));
+        self.factory.push((message::<M, AdApp<A>>, ty));
     }
 
-    pub fn configure(&self, app: AdApp) -> AdApp {
+    pub fn configure(&self, app: AdApp<A>) -> AdApp<A> {
         let mut app = app;
-        for (f, ty) in self.clone().factory {
+        let f: HttpFactory<A> = self.clone();
+        let factory: Vec<(AppFactory<A>, Option<RouteType>)> = f.factory;
+        for (f, ty) in factory.into_iter() {
             app = f(app, ty);
         }
         app
@@ -83,14 +94,30 @@ impl HttpApp for App<Addr<app::ServerIn>> {
 		where
 		    M: MessageExt,
 	{
-		self.route(path, http::Method::POST, handle_request::<M>)
+		self.route(path, http::Method::POST, handle_request::<M, app::ServerIn>)
 	}
 
     fn jmessage<M>(self, path: &str) -> Self
         where
             M: MessageExt,
     {
-        self.route(path, http::Method::POST, handle_json_request::<M>)
+        self.route(path, http::Method::POST, handle_json_request::<M, app::ServerIn>)
+    }
+}
+
+impl HttpApp for App<Addr<app::ClientIn>> {
+    fn message<M>(self, path: &str) -> Self
+        where
+            M: MessageExt,
+    {
+        self.route(path, http::Method::POST, handle_request::<M, app::ClientIn>)
+    }
+
+    fn jmessage<M>(self, path: &str) -> Self
+        where
+            M: MessageExt,
+    {
+        self.route(path, http::Method::POST, handle_json_request::<M, app::ClientIn>)
     }
 }
 
@@ -111,11 +138,12 @@ impl HttpApp for App<Addr<app::ServerIn>> {
 // }
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
-fn handle_json_request<M: 'static>(
-    req: HttpRequest<Addr<app::ServerIn>>
+fn handle_json_request<M, A>(
+    req: HttpRequest<Addr<A>>
 ) -> impl actix_web::Responder
     where
-        M: MessageExt
+        A: actix::Actor<Context=actix::Context<A>> + actix::Handler<M>,
+        M: 'static + MessageExt
 {
     let addr = req.state().clone();
     req.json().map_err(Error::from)
@@ -130,17 +158,18 @@ fn handle_json_request<M: 'static>(
 }
 
 /// Simple wrapper function. Deserialize request, and serialize the output.
-fn handle_request<M: 'static>(
-    req: HttpRequest<Addr<app::ServerIn>>
+fn handle_request<M, A>(
+    req: HttpRequest<Addr<A>>
 ) -> impl actix_web::Responder
 	where
-	    M: MessageExt
+        A: actix::Actor<Context=actix::Context<A>> + actix::Handler<M>,
+	    M: 'static + MessageExt
 {
     trace!("Recieved request: {:?}", &req);
     let addr = req.state().clone();
     req.body().map_err(Error::from)
     	.and_then(|body| {
-            trace!("Recevied message: {:?}. Deserialize as {:?}", body, crate::get_type!(M));
+            trace!("Received message: {:?}. Deserialize as {:?}", body, crate::get_type!(M));
     		bincode::deserialize(&body).map_err(|err| {
                 error!("Failed to deserialize request: {}", err);
                 Error::from(err)
@@ -148,7 +177,6 @@ fn handle_request<M: 'static>(
     	})
         .and_then(move |req: M| {
             trace!("Forwarding message to local handler");
-            trace!("Actor {:?} is connected: {}", addr, addr.connected());
             addr.send(req).map_err(|err| {
                 error!("Failed to send to local handler: {}", err);
                 Error::from(err)

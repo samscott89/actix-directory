@@ -61,7 +61,6 @@ impl Service for TestHandler {
 	fn add_to(self, app: App) -> App {
 		let addr = self.start();
 		app
-		   .route::<TestMessageEmpty, _>(app::no_client(), RouteType::Client)
 		   .route::<TestMessage, _>(addr.clone(), RouteType::Server)
 		   .route::<TestMessageEmpty, _>(addr.clone(), RouteType::Server)
 		   .expose::<TestMessage>()
