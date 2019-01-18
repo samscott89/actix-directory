@@ -112,6 +112,20 @@ impl MessageExt for OpaqueMessage {
     const PATH: &'static str = "";
 }
 
+impl OpaqueMessage {
+	pub fn try_new<M: Serialize>(id: &str, inner: M) -> Result<Self, Error> {
+		bincode::serialize(&inner).map(|inner| {
+			Self {
+				id: id.to_string(),
+				inner,
+			}
+		}).map_err(Error::from)
+	}
+
+	pub fn inner<M: DeserializeOwned>(&self) -> Result<M, Error> {
+		bincode::deserialize(&self.inner).map_err(Error::from)
+	}
+}
 
 
 #[cfg(test)]
