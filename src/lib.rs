@@ -36,11 +36,11 @@ pub mod test_helpers;
 
 use ::actix::dev::*;
 use failure::Error;
-use futures::{Future, IntoFuture};
+use futures::Future;
 use serde::{Deserialize, de::DeserializeOwned, Serialize};
 
 pub mod prelude {
-	pub use crate::{app, http::HttpApp, router::Remote, service::Service, App, FutResponse, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
+	pub use crate::{app, http::HttpApp, router::Remote, service::Service, App, FutActResponse, FutResponse, MessageExt, Routeable, RouteType, PendingRoute, OpaqueMessage,};
 	#[cfg(unix)]
 	pub use crate::Plugin;
 }
