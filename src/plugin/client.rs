@@ -26,7 +26,7 @@ impl Plugin {
                       .spawn().expect("Failed to start plugin");
 
         for msg in messages.iter() {
-            let route = (msg.name.as_str(), sout.clone());
+            let route = (msg.as_str(), sout.clone());
             app = app.route(route, RouteType::Upstream);
         }
         app

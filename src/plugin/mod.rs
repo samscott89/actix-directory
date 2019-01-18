@@ -10,11 +10,13 @@ use std::process::Command;
 
 use crate::prelude::*;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Message {
-    pub name: String,
-    pub ty: RouteType,
-}
+pub type Message = String;
+
+// #[derive(Clone, Debug, Deserialize, Serialize)]
+// pub struct Message {
+//     pub name: String,
+//     pub ty: RouteType,
+// }
 
 /// Describes attributes and capabilities of a plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]

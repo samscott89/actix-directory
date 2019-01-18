@@ -16,8 +16,8 @@ pub fn test_plugin() -> Plugin {
 		// version: "0.1"
 		exec_path: PathBuf::from("./target/debug/test-plugin"),
 		messages: vec![
-			crate::plugin::Message { name: "test".to_string(), ty: RouteType::Server },
-			crate::plugin::Message { name: "test_empty".to_string(), ty: RouteType::Server },
+			"test".to_string(),
+			"test_empty".to_string(),
 		],
 	}
 }
