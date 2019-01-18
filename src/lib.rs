@@ -36,7 +36,7 @@ pub mod test_helpers;
 
 use ::actix::dev::*;
 use failure::Error;
-use futures::Future;
+use futures::{Future, IntoFuture};
 use serde::{Deserialize, de::DeserializeOwned, Serialize};
 
 pub mod prelude {
@@ -67,6 +67,9 @@ pub trait MessageExt:
 /// of `M::Response`,  corresponding to the app-level error.
 pub struct FutResponse<M: MessageExt>(pub Box<Future<Item=M::Response, Error=Error>>);
 
+/// The equivalent to `FutResponse` but for actor futures.
+pub struct FutActResponse<A: Actor, M: MessageExt>(pub Box<ActorFuture<Item=M::Response, Error=Error, Actor=A>>);
+
 impl<F, M> From<F> for FutResponse<M>
     where
         M: MessageExt, 
@@ -89,6 +92,33 @@ impl<A, M> MessageResponse<A, M> for FutResponse<M>
             }
             Ok(())
         }).map_err(|_| ()));
+    }
+}
+
+impl<A, F, M> From<F> for FutActResponse<A, M>
+    where
+    	A: Actor,
+        M: MessageExt, 
+        F: 'static + ActorFuture<Actor=A, Item=M::Response, Error=Error>,
+{
+    fn from(other: F) -> Self {
+        FutActResponse(Box::new(other))
+    }
+}
+
+impl<A, M> MessageResponse<A, M> for FutActResponse<A, M>
+    where 
+        A: Actor<Context=Context<A>>,
+        M: MessageExt,
+{
+    fn handle<R: ResponseChannel<M>>(self, ctxt: &mut Context<A>, tx: Option<R>) {
+    	ctxt.spawn(self.0.and_then(move |res, _, _| {
+    	    if let Some(tx) = tx {
+    	        tx.send(res);
+    	    }
+    	    actix::fut::ok(())
+    	    // Ok(()).into_future().into_actor(act)
+    	}).map_err(|_, _, _| ()));
     }
 }
 
