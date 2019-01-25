@@ -10,7 +10,8 @@ impl Plugin {
             name,
             // version,
             exec_path,
-            messages
+            messages,
+            opt_args,
         } = self;
         let sin = crate::app::sock_path("main");
         // let sin2 = socket.clone();
@@ -23,6 +24,7 @@ impl Plugin {
         }
         let _res = cmd.arg(&sin.to_str().unwrap_or("/dev/null"))
                       .arg(&sout2.to_str().unwrap_or("/dev/null"))
+                      .args(opt_args)
                       .spawn().expect("Failed to start plugin");
 
         for msg in messages.iter() {

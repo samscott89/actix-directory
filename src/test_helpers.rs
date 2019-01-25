@@ -19,6 +19,7 @@ pub fn test_plugin() -> Plugin {
 			"test".to_string(),
 			"test_empty".to_string(),
 		],
+		opt_args: Vec::new(),
 	}
 }
 

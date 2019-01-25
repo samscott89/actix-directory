@@ -25,6 +25,7 @@ pub struct Plugin {
     // pub version: String,
     /// path to plugin executable
     pub exec_path: PathBuf,
+    pub opt_args: Vec<String>,
     #[serde(default)]
     pub messages: Vec<Message>,
 }
