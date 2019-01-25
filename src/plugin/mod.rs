@@ -6,9 +6,6 @@ pub use self::server::run;
 use serde::{Deserialize, Serialize};
 
 use std::path::PathBuf;
-use std::process::Command;
-
-use crate::prelude::*;
 
 pub type Message = String;
 
@@ -25,6 +22,7 @@ pub struct Plugin {
     // pub version: String,
     /// path to plugin executable
     pub exec_path: PathBuf,
+    #[serde(default)]
     pub opt_args: Vec<String>,
     #[serde(default)]
     pub messages: Vec<Message>,

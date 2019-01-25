@@ -8,9 +8,7 @@ use log::*;
 use url::Url;
 
 use std::marker::PhantomData;
-#[cfg(unix)]
-use std::os::unix::net::{UnixStream, UnixListener};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{MessageExt, FutResponse};
 

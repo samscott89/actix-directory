@@ -1,12 +1,7 @@
 use actix::dev::*;
-use log::*;
-use futures::Future;
-use serde::{Deserialize, Serialize};
 
 use std::env;
 use std::path::PathBuf;
-
-use crate::prelude::*;
 
 pub fn run(app: crate::App) {
 	init_logger();

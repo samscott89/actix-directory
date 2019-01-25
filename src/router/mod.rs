@@ -2,7 +2,7 @@
 
 use ::actix::dev::*;
 use failure::{Error, Fail};
-use futures::{future, Future, IntoFuture};
+use futures::{Future, IntoFuture};
 use log::*;
 use serde::{Deserialize, Serialize};
 
