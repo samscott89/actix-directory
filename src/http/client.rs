@@ -1,79 +1,43 @@
-//! Create remote actors to use as actors.
-// use actix::Addr;
-use actix::prelude::*;
 use actix_web::{client::ClientRequest, HttpMessage};
 use failure::Error;
 use futures::{future, Future};
 use log::*;
 use url::Url;
 
-use std::marker::PhantomData;
-use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::net::{UnixStream, UnixListener};
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 
-use crate::{MessageExt, FutResponse};
-
-impl<M: MessageExt> From<Url> for HttpHandler<M> {
-    fn from(other: Url) -> Self {
-        HttpHandler(other, PhantomData)
-    }
-}
-
-/// The `HttpHandler` wraps a `Url` and behaves as a handler for the generic
-/// type `M`. This can be registered as a usual `RequestHandler<M>`, but the
-/// fact that the actual handler is remote is opaque to the application. 
-pub struct HttpHandler<M>(pub Url, PhantomData<M>);
-
-impl<M: 'static> Actor for HttpHandler<M> {
-    type Context = Context<Self>;
-}
-
-impl<M: MessageExt> Handler<M> for HttpHandler<M> {
-    type Result = FutResponse<M>;
-
-    fn handle(&mut self, msg: M, _ctxt: &mut Context<Self>) -> Self::Result {
-        let url = self.0.clone();
-        let path = url.path().to_string();
-        let msg = bincode::serialize(&msg).map_err(Error::from);
-        trace!("Channel making request to Actor running at {} on path {}", url.host_str().unwrap_or(""), path);
-        let fut = future::result(msg).and_then(move |msg| {
-            ClientRequest::post(format!("/{}", M::PATH))
-                .body(msg)
-                .unwrap()
-                .send()
-                .map_err(Error::from)
-                .and_then(|resp| {
-                    // Deserialize the JSON and map the error
-                    resp.body().map_err(Error::from)
-                })
-                .and_then(|body| {
-                    future::result(bincode::deserialize(&body))
-                        .map_err(Error::from)
-                })
-        });
-        
-        FutResponse(Box::new(fut))
-    }
-}
+use crate::MessageExt;
 
 pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     where M: MessageExt,
 {
     // let path = url.path().to_string();
     let msg = bincode::serialize(&msg).map_err(Error::from);
-    trace!("Channel making request to Actor running at {:?}", url);
+    trace!("Channel making request to Actor running at {:?} on path {}", url, M::PATH);
     future::result(msg).and_then(move |msg| {
-        ClientRequest::post(url)
+        ClientRequest::post(url.join(M::PATH).unwrap())
             .body(msg)
             .unwrap()
             .send()
-            .map_err(Error::from)
+            .map_err(|e| {
+                error!("Failed to send HTTP request: {:?} ", e);
+                Error::from(e)
+            })
             .and_then(|resp| {
-                // Deserialize the JSON and map the error
-                resp.body().map_err(Error::from)
+                resp.body().map_err(|e| {
+                    error!("Could not get bytes: {:?} ", e);
+                    Error::from(e)
+                })
             })
             .and_then(|body| {
                 future::result(bincode::deserialize(&body))
-                    .map_err(Error::from)
+                    .map_err(|e| {
+                        error!("Failed to deserialize body: {:?} ", e);
+                        Error::from(e)
+                    })
             })
     })
 }

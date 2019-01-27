@@ -294,7 +294,7 @@ mod tests {
 	       	let app_fact = ad_app.http_server().clone();
 	        ad_app.make_current();
 	        let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
-	        sender.send(format!("http://{}/{}", server.addrs()[0], TestMessage::PATH)).unwrap();
+	        sender.send(format!("http://{}/", server.addrs()[0])).unwrap();
 	        server.start();
 	        sys.run();
 	    });

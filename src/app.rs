@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use std::cell::RefCell;
 use std::ops::Deref;
+#[cfg(unix)]
+use std::os::unix::net::{UnixStream, UnixListener};
+#[cfg(unix)]
 use std::path::PathBuf;
-// use std::sync::RwLock;
 use std::sync::Arc;
 
 use crate::prelude::*;
-// use crate::{MessageExt, FutResponse, OpaqueMessage};
 use crate::{get_type, router, service};
 use crate::http::HttpFactory;
 use crate::router::Router;
@@ -30,6 +31,7 @@ thread_local!(
     pub(crate) static SOCKET_DIR: tempfile::TempDir = tempfile::tempdir().unwrap();
 );
 
+#[cfg(unix)]
 pub(crate) fn sock_path(name: &str) -> PathBuf {
     // let tmp_dir = tempdir::TempDir::new("actix-dir").unwrap();
     SOCKET_DIR.with(|dir| dir.path().join(format!("{}.sock", name)))
