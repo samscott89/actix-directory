@@ -26,5 +26,8 @@ pub struct Plugin {
     pub opt_args: Vec<String>,
     #[serde(default)]
     pub messages: Vec<Message>,
+
+    /// Is this a client/server/upstream plugin?
+    pub ty: crate::RouteType,
 }
 

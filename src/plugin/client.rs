@@ -12,6 +12,7 @@ impl Plugin {
             exec_path,
             messages,
             opt_args,
+            ty
         } = self;
         let sin = crate::app::sock_path("main");
         // let sin2 = socket.clone();
@@ -29,7 +30,7 @@ impl Plugin {
 
         for msg in messages.iter() {
             let route = (msg.as_str(), sout.clone());
-            app = app.route(route, RouteType::Upstream);
+            app = app.route(route, ty);
         }
         app
     }

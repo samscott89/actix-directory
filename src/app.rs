@@ -395,6 +395,7 @@ pub fn no_server<M: MessageExt>() -> Recipient<M> {
 /// an RPC endpoint.
 ///
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RouteType {
     Client,
     Server,
