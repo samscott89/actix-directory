@@ -25,6 +25,7 @@ pub struct Router {
     pub name: String,
     pub routes: anymap::AnyMap,
     pub str_routes: HashMap<String, Recipient<OpaqueMessage>>,
+    pub default: Option<Addr<Remote>>,
     #[cfg(feature="debugging_info")]
     _info: Vec<String>,
 }
@@ -41,6 +42,7 @@ impl Router {
             name: format!("{} on thread: {:?}", name, std::thread::current().id()),
             routes: anymap::AnyMap::new(),
             str_routes: HashMap::new(),
+            default: None,
             #[cfg(feature="debugging_info")]
             _info: Vec::new(),
         }
@@ -48,13 +50,7 @@ impl Router {
 
     /// Create a new router.
     pub fn new() -> Self {
-        Router {
-            name: format!("Router on thread: {:?}", std::thread::current().id()),
-            routes: anymap::AnyMap::new(),
-            str_routes: HashMap::new(),
-            #[cfg(feature="debugging_info")]
-            _info: Vec::new(),
-        }
+        Router::with_name("Router")
     }
 
     /// Add this address into the routing table.
@@ -76,7 +72,7 @@ impl Router {
     fn get_str(&self, id: &str) -> Option<Recipient<OpaqueMessage>>
     {
         trace!("Lookup request handler for {:?}", id);
-        self.str_routes.get(id).cloned()
+        self.str_routes.get(id).cloned().or_else(|| self.default.clone().map(Addr::recipient))
     }
 
     /// Get the handler identified by the generic type parameter `M`.
@@ -84,7 +80,8 @@ impl Router {
         where M: MessageExt,
     {
         trace!("Lookup request handler for {:?}", get_type!(M));
-        self.routes.get().cloned()
+        self.routes.get().cloned().or_else(|| self.default.clone().map(Addr::recipient))
+
     }
 
     pub fn recipient_for<M>(&self, msg: &M) -> Option<Recipient<M>>

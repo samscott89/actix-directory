@@ -315,6 +315,41 @@ mod tests {
 	    assert_eq!(res.0, 138);
 	}
 
+    #[test]
+    fn test_http_default() {
+        init_logger();
+        let mut sys = System::new("test_client");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            init_logger();
+            let sys = System::new("test_server");
+            let addr = TestHandler::default();
+            let ad_app = app::App::new()
+                .service(addr);
+            let app_fact = ad_app.http_server().clone();
+            ad_app.make_current();
+            let server = server::new(app_fact).bind("0.0.0.0:0").unwrap();
+            sender.send(format!("http://{}/", server.addrs()[0])).unwrap();
+            server.start();
+            sys.run();
+        });
+
+        thread::sleep(time::Duration::from_millis(100));
+
+        let url = receiver.recv().unwrap();
+        log::trace!("Test URL: {}", url);
+        let url = Url::parse(&url).unwrap();
+
+        let _service = app::App::new()
+            .default_route(url)
+            .make_current();
+
+        let res = sys.block_on(app::send(TestMessage(138)));
+        log::trace!("RPC result: {:?}", res);
+        let res = res.unwrap();
+        assert_eq!(res.0, 138);
+    }
+
 	#[test]
 	fn test_rpc_service() {
 	    init_logger();

@@ -106,6 +106,12 @@ impl App {
         self
     }
 
+    /// Set a default fallback route as an upstream route
+    pub fn default_route<R: Into<Remote>>(mut self, remote: R) -> Self {
+        self.upstream.default = Some(remote.into().start());
+        self
+    }
+
     /// Add a service to the application, usually encapsulates mutliple routes
     pub fn service<S: service::Service>(self, service: S) -> Self {
         service.add_to(self)
