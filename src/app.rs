@@ -72,7 +72,8 @@ impl std::default::Default for App {
 impl App {
     /// Create a new application with empty routing tables
     pub fn new() -> Self {
-        let http = HttpFactory::new();
+        let mut http = HttpFactory::new();
+        http.route::<OpaqueMessage>(None);
         let mut http_internal = HttpFactory::new();
         http_internal.route::<OpaqueMessage>(Some(RouteType::Client));
         let client = Router::with_name("client");
