@@ -9,13 +9,14 @@ use std::os::unix::net::{UnixStream, UnixListener};
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 
+use crate::{deserialize, serialize};
 use crate::MessageExt;
 
 pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     where M: MessageExt,
 {
     // let path = url.path().to_string();
-    let msg = bincode::serialize(&msg).map_err(Error::from);
+    let msg = serialize(&msg).map_err(Error::from);
     trace!("Channel making request to Actor running at {:?} on path {}", url, M::PATH);
     future::result(msg).and_then(move |msg| {
         ClientRequest::post(url.join(M::PATH).unwrap())
@@ -33,7 +34,7 @@ pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
                 })
             })
             .and_then(|body| {
-                future::result(bincode::deserialize(&body))
+                future::result(deserialize(&body))
                     .map_err(|e| {
                         error!("Failed to deserialize body: {:?} ", e);
                         Error::from(e)
@@ -48,7 +49,7 @@ pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Erro
 {
     // let path = url.path().to_string();
     trace!("Sending message: {:?} to {:?}", msg, path);
-    let msg = bincode::serialize(&msg).map_err(Error::from);
+    let msg = serialize(&msg).map_err(Error::from);
     trace!("Serialized: {:?}", msg);
     trace!("Channel making request to Actor running on local socket at {:?}", path);
     tokio_uds::UnixStream::connect(path).from_err().and_then(|uds| {
@@ -66,7 +67,7 @@ pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Erro
                 resp.body().map_err(Error::from)
             })
             .and_then(|body| {
-                future::result(bincode::deserialize(&body))
+                future::result(deserialize(&body))
                     .map_err(Error::from)
             })
     })

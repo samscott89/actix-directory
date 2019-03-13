@@ -7,6 +7,8 @@ use log::*;
 use crate::{MessageExt, RouteType};
 use crate::app;
 
+use crate::{deserialize, serialize};
+
 type AdApp<A> = App<Addr<A>>;
 type AppFactory<A> = fn(AdApp<A>, Option<RouteType>) -> AdApp<A>;
 
@@ -170,7 +172,7 @@ fn handle_request<M, A>(
     req.body().map_err(Error::from)
     	.and_then(|body| {
             trace!("Received message: {:?}. Deserialize as {:?}", body, crate::get_type!(M));
-    		bincode::deserialize(&body).map_err(|err| {
+    		deserialize(&body).map_err(|err| {
                 error!("Failed to deserialize request: {}", err);
                 Error::from(err)
             })
@@ -182,7 +184,7 @@ fn handle_request<M, A>(
                 Error::from(err)
             })
         })
-        .and_then(|resp| future::result(bincode::serialize(&resp)).map_err(Error::from))
+        .and_then(|resp| future::result(serialize(&resp)).map_err(Error::from))
         .map(|resp| {
             trace!("Handled request successfully");
             HttpResponse::Ok().body(resp)

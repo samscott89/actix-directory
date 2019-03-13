@@ -144,7 +144,7 @@ impl MessageExt for OpaqueMessage {
 
 impl OpaqueMessage {
 	pub fn try_new<M: Serialize>(id: &str, inner: M) -> Result<Self, Error> {
-		bincode::serialize(&inner).map(|inner| {
+		serialize(&inner).map(|inner| {
 			Self {
 				id: id.to_string(),
 				inner,
@@ -153,8 +153,16 @@ impl OpaqueMessage {
 	}
 
 	pub fn inner<M: DeserializeOwned>(&self) -> Result<M, Error> {
-		bincode::deserialize(&self.inner).map_err(Error::from)
+		deserialize(&self.inner).map_err(Error::from)
 	}
+}
+
+pub fn deserialize<'de, M: serde::Deserialize<'de>>(bytes: &'de [u8]) -> Result<M, Error> {
+    serde_cbor::from_slice(bytes).map_err(|e| Error::from(e))
+}
+
+pub fn serialize<M: serde::Serialize>(msg: M) -> Result<Vec<u8>, Error> {
+    serde_cbor::to_vec(&msg).map_err(|e| Error::from(e))
 }
 
 
@@ -395,7 +403,7 @@ mod tests {
         // Give the plugin time to spin up?
         thread::sleep(time::Duration::from_millis(100));
 
-        let msg = crate::OpaqueMessage { id: "test".to_string(), inner: bincode::serialize(&TestMessage(123)).unwrap()};
+        let msg = crate::OpaqueMessage::try_new("test", &TestMessage(123)).unwrap();
 	    let _res = sys.block_on(app::send(msg)).unwrap();
 	}
 }

@@ -20,6 +20,7 @@ pub fn test_plugin() -> Plugin {
 			"test_empty".to_string(),
 		],
 		opt_args: Vec::new(),
+		ty: RouteType::Server,
 	}
 }
 
