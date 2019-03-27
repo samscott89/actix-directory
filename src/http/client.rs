@@ -8,6 +8,7 @@ use url::Url;
 use std::os::unix::net::{UnixStream, UnixListener};
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::{deserialize, serialize};
 use crate::MessageExt;
@@ -20,6 +21,7 @@ pub fn send<M>(msg: &M, url: Url) -> impl Future<Item=M::Response, Error=Error>
     trace!("Channel making request to Actor running at {:?} on path {}", url, M::PATH);
     future::result(msg).and_then(move |msg| {
         ClientRequest::post(url.join(M::PATH).unwrap())
+            .timeout(Duration::from_secs(60 * 60))
             .body(msg)
             .unwrap()
             .send()
@@ -58,6 +60,7 @@ pub fn send_local<M>(msg: &M, path: &Path) -> impl Future<Item=M::Response, Erro
     .and_then(|(msg, uds)| {
         let conn = actix_web::client::Connection::from_stream(uds);
         ClientRequest::post(format!("/{}", M::PATH))
+            .timeout(Duration::from_secs(60 * 60))
             .with_connection(conn)
             .body(msg)
             .unwrap()
